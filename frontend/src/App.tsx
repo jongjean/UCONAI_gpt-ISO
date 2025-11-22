@@ -804,7 +804,7 @@ const App: React.FC = () => {
         <div className="iso-sidebar-section" style={{flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0}}>
           <div className="iso-sidebar-section-title">테마 목록</div>
           <ul className="iso-sidebar-conv-list" style={{flex: 1, minHeight: 0, overflowY: 'auto'}}>
-            {conversations.map((c, idx) => (
+            {conversations.map((c) => (
               <li
                 key={c.id}
                 className={
