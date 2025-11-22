@@ -813,69 +813,75 @@ const App: React.FC = () => {
                     : "iso-sidebar-conv-item"
                 }
                 onClick={() => setActiveConversationId(c.id)}
-                style={{ position: 'relative' }}
+                style={{ position: 'relative', paddingRight: 32 }}
               >
-                <div style={{position:'relative', minHeight: 16}}>
-                  {conversations.length > 1 && (
-                    <button
-                      type="button"
-                      title="테마 삭제"
-                      className="iso-sidebar-conv-xbtn"
-                      onClick={e => {
-                        e.stopPropagation();
-                        if (window.confirm('정말 이 테마를 삭제하시겠습니까?')) {
-                          setConversations(prev => {
-                            const filtered = prev.filter(conv => conv.id !== c.id);
-                            if (c.id === activeConversationId && filtered.length > 0) {
-                              setActiveConversationId(filtered[0].id);
-                            }
-                            return filtered;
-                          });
+                <div
+                  className="iso-sidebar-conv-title"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleEditTitleStart(c);
+                  }}
+                >
+                  {editingConvId === c.id ? (
+                    <input
+                      type="text"
+                      value={editingTitle}
+                      autoFocus
+                      onChange={(e) => setEditingTitle(e.target.value)}
+                      onBlur={() => handleEditTitleSave(c.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleEditTitleSave(c.id);
+                        if (e.key === "Escape") {
+                          setEditingConvId(null);
+                          setEditingTitle("");
                         }
                       }}
-                      tabIndex={-1}
-                    >
-                      <span style={{fontSize: 10, lineHeight: 1, pointerEvents: 'none'}}>×</span>
-                    </button>
+                    />
+                  ) : (
+                    <span>{c.title}</span>
                   )}
-                  <div
-                    className="iso-sidebar-conv-title"
-                    onClick={(e) => {
+                </div>
+                <div className="iso-sidebar-conv-meta">
+                  {c.createdAt} · {c.messages.length} 메시지
+                </div>
+                {conversations.length > 1 && (
+                  <button
+                    type="button"
+                    title="테마 삭제"
+                    onClick={e => {
                       e.stopPropagation();
-                      handleEditTitleStart(c);
+                      // 삭제 로직
+                      setConversations(prev => {
+                        const filtered = prev.filter(conv => conv.id !== c.id);
+                        // 삭제된 테마가 현재 active면, 첫 번째 테마로 이동
+                        if (c.id === activeConversationId && filtered.length > 0) {
+                          setActiveConversationId(filtered[0].id);
+                        }
+                        return filtered;
+                      });
+                    }}
+                    style={{
+                      position: 'absolute',
+                      right: 4,
+                      top: 8,
+                      width: 20,
+                      height: 20,
+                      border: 'none',
+                      borderRadius: 999,
+                      background: '#f3f4f6',
+                      color: '#b91c1c',
+                      fontWeight: 700,
+                      fontSize: 13,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      zIndex: 1,
                     }}
                   >
-                    {editingConvId === c.id ? (
-                      <input
-                        type="text"
-                        value={editingTitle}
-                        autoFocus
-                        onChange={(e) => setEditingTitle(e.target.value)}
-                        onBlur={() => handleEditTitleSave(c.id)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") handleEditTitleSave(c.id);
-                          if (e.key === "Escape") {
-                            setEditingConvId(null);
-                            setEditingTitle("");
-                          }
-                        }}
-                      />
-                    ) : (
-                      <span>{c.title}</span>
-                    )}
-                  </div>
-                  <div className="iso-sidebar-conv-meta">
-                    {(() => {
-                      // Extract date (YYYY. MM. DD.) and 오전/오후 HH:MM from c.createdAt
-                      // Example: '2025. 11. 22. 오후 6:56:10'
-                      const dateMatch = c.createdAt.match(/^(\d{4}\. ?\d{1,2}\. ?\d{1,2}\.)/);
-                      const timeMatch = c.createdAt.match(/(오전|오후)\s*\d{1,2}:\d{2}/);
-                      const date = dateMatch ? dateMatch[1].trim() : '';
-                      const time = timeMatch ? timeMatch[0] : '';
-                      return (date + (time ? ' ' + time : '')) + ' · ' + c.messages.length + ' 메시지';
-                    })()}
-                  </div>
-                </div>
+                    ×
+                  </button>
+                )}
               </li>
             ))}
           </ul>
