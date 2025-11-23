@@ -2,7 +2,8 @@ import React, { useEffect, useRef, useState } from "react";
 import "./App.css";
 
 // ===== API ENDPOINT BASE URL =====
-// 운영: Caddy에서 /api/* → 127.0.0.1:4400 으로 프록시
+// 운영: https://uconcreative.ddns.net/api/...
+// (Caddy에서 /api/* → 127.0.0.1:4400 으로 프록시)
 const API_BASE = "/api";
 
 type ModelOption = string;
@@ -53,9 +54,6 @@ const ClipIcon: React.FC = () => (
   </span>
 );
 
-// =====================================
-// GuidePanel 타입 정의
-// =====================================
 type GuidePanelProps = {
   isOpen: boolean;
   onClose: () => void;
@@ -67,9 +65,6 @@ type GuidePanelProps = {
   onDeleteGuide: (id: string, scope: "global" | "conversation") => void;
 };
 
-// =====================================
-// GuidePanel 컴포넌트 (플로팅 창)
-// =====================================
 const GuidePanel: React.FC<GuidePanelProps> = ({
   isOpen,
   onClose,
@@ -83,35 +78,34 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
   const [tab, setTab] = useState<"global" | "conversation">("global");
   const [editing, setEditing] = useState<Guide | null>(null);
 
-  // 드래그 이동용 상태
+  // 이동 관련 상태
   const [pos, setPos] = useState<{ x: number; y: number }>({
     x: window.innerWidth / 2 - 360,
     y: window.innerHeight / 2 - 320,
   });
   const [dragging, setDragging] = useState(false);
-  const [offset, setOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [offset, setOffset] = useState<{ x: number; y: number }>({
+    x: 0,
+    y: 0,
+  });
   const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setEditing(null);
   }, [tab, activeConversationId]);
 
-  const currentList = tab === "global" ? globalGuides : conversationGuides;
-
-  // 헤더 드래그 시작
+  // 드래그 이벤트 핸들러
   const handleMouseDown = (e: React.MouseEvent) => {
-    if (!panelRef.current) return;
-    setDragging(true);
-    setOffset({
-      x: e.clientX - pos.x,
-      y: e.clientY - pos.y,
-    });
+    if (panelRef.current) {
+      setDragging(true);
+      setOffset({
+        x: e.clientX - pos.x,
+        y: e.clientY - pos.y,
+      });
+    }
   };
-
-  // 드래그 중 마우스 이동
   useEffect(() => {
     if (!dragging) return;
-
     const handleMouseMove = (e: MouseEvent) => {
       setPos({
         x: Math.max(0, Math.min(window.innerWidth - 720, e.clientX - offset.x)),
@@ -119,29 +113,30 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
       });
     };
     const handleMouseUp = () => setDragging(false);
-
     window.addEventListener("mousemove", handleMouseMove);
     window.addEventListener("mouseup", handleMouseUp);
-
     return () => {
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
     };
   }, [dragging, offset]);
 
-  // 창 크기 변경 시 위치 보정 (최초 1회)
   useEffect(() => {
+    // 창 크기 변경 시 패널 위치 보정
     setPos((prev) => ({
       x: Math.min(prev.x, window.innerWidth - 720),
       y: Math.min(prev.y, window.innerHeight - 100),
     }));
-  }, []);
+    // eslint-disable-next-line
+  }, [window.innerWidth, window.innerHeight]);
 
   if (!isOpen) return null;
 
+  const currentList = tab === "global" ? globalGuides : conversationGuides;
+
   const handleChangeTitle = (value: string) => {
     if (!editing) return;
-    const updated: Guide = {
+    const updated = {
       ...editing,
       title: value,
       updatedAt: new Date().toISOString(),
@@ -152,7 +147,7 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
 
   const handleChangeContent = (value: string) => {
     if (!editing) return;
-    const updated: Guide = {
+    const updated = {
       ...editing,
       content: value,
       updatedAt: new Date().toISOString(),
@@ -161,29 +156,17 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
     onUpdateGuide(updated);
   };
 
-  const handleDelete = (guideId: string) => {
-    const scope: "global" | "conversation" = tab;
-    if (!window.confirm("이 지침을 삭제하시겠습니까?")) return;
-    onDeleteGuide(guideId, scope);
-    if (editing?.id === guideId) {
-      setEditing(null);
-    }
-  };
-
   return (
     <>
-      {/* 어둡게 처리된 배경 */}
       <div
         style={{
           position: "fixed",
           inset: 0,
           zIndex: 1000,
           background: "rgba(0,0,0,0.4)",
+          pointerEvents: dragging ? "none" : "auto",
         }}
-        onClick={onClose}
       />
-
-      {/* 패널 본체 */}
       <div
         ref={panelRef}
         style={{
@@ -204,7 +187,7 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
           userSelect: dragging ? "none" : undefined,
         }}
       >
-        {/* 헤더 (드래그 핸들) */}
+        {/* 헤더 */}
         <div
           style={{
             display: "flex",
@@ -219,7 +202,13 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
         >
           <div>
             <div style={{ fontWeight: 600, fontSize: 14 }}>지침 / 가이드 관리</div>
-            <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 2 }}>
+            <div
+              style={{
+                fontSize: 11,
+                color: "#9ca3af",
+                marginTop: 2,
+              }}
+            >
               프로젝트 공통 지침과 대화방별 지침을 구분해서 관리합니다.
             </div>
           </div>
@@ -282,8 +271,7 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
               background: tab === "conversation" ? "#7c3aed" : "#1f2937",
               color: tab === "conversation" ? "#fff" : "#9ca3af",
               fontSize: 12,
-              cursor: activeConversationId ? "pointer" : "not-allowed",
-              opacity: activeConversationId ? 1 : 0.5,
+              cursor: "pointer",
             }}
             disabled={!activeConversationId}
           >
@@ -291,26 +279,10 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
           </button>
         </div>
 
-        {/* 본문: 좌측 리스트 / 우측 편집 */}
-        <div
-          style={{
-            display: "flex",
-            flex: 1,
-            gap: 16,
-            minHeight: 260,
-            minWidth: 0,
-          }}
-        >
-          {/* 좌측: 리스트 영역 (고정 폭) */}
-          <div
-            style={{
-              flex: "0 0 260px",
-              maxWidth: 300,
-              minWidth: 220,
-              display: "flex",
-              flexDirection: "column",
-            }}
-          >
+        {/* 본문 */}
+        <div style={{ display: "flex", flex: 1, gap: 16, minHeight: 260 }}>
+          {/* 리스트 */}
+          <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
             <button
               onClick={() => onCreateGuide(tab)}
               style={{
@@ -362,19 +334,9 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
                       }}
                       onClick={() => setEditing(g)}
                     >
-                      {/* 제목: 한 줄, 말줄임 */}
-                      <div
-                        style={{
-                          fontWeight: 600,
-                          fontSize: 13,
-                          whiteSpace: "nowrap",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                        }}
-                      >
+                      <div style={{ fontWeight: 600, fontSize: 13 }}>
                         {g.title || "(제목 없음)"}
                       </div>
-                      {/* 내용: 한 줄 요약 */}
                       <div
                         style={{
                           marginTop: 2,
@@ -385,17 +347,16 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
                           overflow: "hidden",
                         }}
                       >
-                        {(g.content || "내용 없음")
-                          .replace(/\s+/g, " ")
-                          .slice(0, 80)}
+                        {g.content || "내용 없음"}
                       </div>
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleDelete(g.id);
+                          onDeleteGuide(g.id, tab);
+                          if (editing?.id === g.id) setEditing(null);
                         }}
                         style={{
-                          marginTop: 4,
+                          marginTop: 2,
                           border: 0,
                           background: "none",
                           color: "#f97373",
@@ -412,15 +373,8 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
             </div>
           </div>
 
-          {/* 우측: 편집 영역 */}
-          <div
-            style={{
-              flex: "1 1 auto",
-              minWidth: 0,
-              display: "flex",
-              flexDirection: "column",
-            }}
-          >
+          {/* 편집 영역 */}
+          <div style={{ flex: 2, display: "flex", flexDirection: "column" }}>
             {editing ? (
               <>
                 <input
@@ -441,7 +395,7 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
                 <textarea
                   value={editing.content}
                   onChange={(e) => handleChangeContent(e.target.value)}
-                  placeholder="지침 내용 또는 ISO/법률 작성 가이드라인을 입력하세요. (텍스트/코드를 그대로 붙여넣기 가능)"
+                  placeholder="지침 내용 또는 ISO 작성 가이드라인을 입력하세요."
                   style={{
                     flex: 1,
                     width: "100%",
@@ -461,8 +415,8 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
                     color: "#9ca3af",
                   }}
                 >
-                  ※ PDF/워드/이미지 등 파일은 메인 화면 하단의 첨부 기능을 사용해 주세요.
-                  지침에는 텍스트/코드를 직접 붙여 넣어 관리하는 방식을 기본으로 합니다.
+                  ※ 파일 첨부/드래그앤드롭, 서버 저장 연동은 다음 버전에서 확장할 수
+                  있습니다.
                 </div>
               </>
             ) : (
@@ -493,6 +447,19 @@ const App: React.FC = () => {
   const [modelList, setModelList] = useState<{ id: string; label: string }[]>(
     []
   );
+
+  useEffect(() => {
+    fetch(`${API_BASE}/models`)
+      .then((res) => res.json())
+      .then((data) => setModelList(data.models))
+      .catch(() => {
+        setModelList([
+          { id: "gpt-5.1", label: "gpt-5.1" },
+          { id: "gpt-4.1", label: "gpt-4.1" },
+          { id: "gpt-4.1-mini", label: "gpt-4.1-mini" },
+        ]);
+      });
+  }, []);
   const [runMode, setRunMode] = useState<RunMode>("responses");
   const [answerMode, setAnswerMode] = useState<AnswerMode>("strict");
 
@@ -512,24 +479,20 @@ const App: React.FC = () => {
       },
     ];
   });
-
   const [activeConversationId, setActiveConversationId] =
     useState<string>(() => {
       return localStorage.getItem("activeConversationId") || "default";
     });
-
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>(() => {
     const saved = localStorage.getItem("attachedFiles");
     if (saved) return JSON.parse(saved);
     return [];
   });
-
   const [globalGuides, setGlobalGuides] = useState<Guide[]>(() => {
     const saved = localStorage.getItem("globalGuides");
     if (saved) return JSON.parse(saved);
     return [];
   });
-
   const [conversationGuides, setConversationGuides] = useState<
     Record<string, Guide[]>
   >(() => {
@@ -537,24 +500,19 @@ const App: React.FC = () => {
     if (saved) return JSON.parse(saved);
     return {};
   });
-
   // 상태 변경 시 localStorage에 동기화
   useEffect(() => {
     localStorage.setItem("conversations", JSON.stringify(conversations));
   }, [conversations]);
-
   useEffect(() => {
     localStorage.setItem("activeConversationId", activeConversationId);
   }, [activeConversationId]);
-
   useEffect(() => {
     localStorage.setItem("attachedFiles", JSON.stringify(attachedFiles));
   }, [attachedFiles]);
-
   useEffect(() => {
     localStorage.setItem("globalGuides", JSON.stringify(globalGuides));
   }, [globalGuides]);
-
   useEffect(() => {
     localStorage.setItem(
       "conversationGuides",
@@ -575,20 +533,6 @@ const App: React.FC = () => {
 
   const activeConvGuides: Guide[] =
     conversationGuides[activeConversationId] || [];
-
-  // 모델 목록 불러오기
-  useEffect(() => {
-    fetch(`${API_BASE}/models`)
-      .then((res) => res.json())
-      .then((data) => setModelList(data.models))
-      .catch(() => {
-        setModelList([
-          { id: "gpt-5.1", label: "gpt-5.1" },
-          { id: "gpt-4.1", label: "gpt-4.1" },
-          { id: "gpt-4.1-mini", label: "gpt-4.1-mini" },
-        ]);
-      });
-  }, []);
 
   const handleNewConversation = () => {
     const id = `conv-${Date.now()}`;
@@ -796,7 +740,7 @@ const App: React.FC = () => {
         content:
           assistantText && assistantText.trim().length > 0
             ? assistantText
-            : "유효한 정보가 없습니다. 관련 기초 정보를 제공해 주시면 심층 학습하여 더 나은 정보를 드리겠습니다.",
+            : "정확한 정보가 부족하지만, 향후 Deep Learning을 위해 관련 자료(초안, TR, 회의 문서 등)를 제공해주시면 더 구체적으로 도와드릴 수 있습니다.",
       };
 
       setConversations((prev) =>
@@ -836,7 +780,10 @@ const App: React.FC = () => {
     } else if (activeConversationId) {
       setConversationGuides((prev) => ({
         ...prev,
-        [activeConversationId]: [base, ...(prev[activeConversationId] || [])],
+        [activeConversationId]: [
+          base,
+          ...(prev[activeConversationId] || []),
+        ],
       }));
     }
   };
@@ -874,7 +821,7 @@ const App: React.FC = () => {
 
   return (
     <div className="iso-app-root">
-      {/* 좌측 사이드바 */}
+      {/* 사이드바 */}
       <aside className="iso-sidebar">
         <div className="iso-sidebar-header">
           <div className="iso-sidebar-title">UCONAI gpt-ISO Expert</div>
@@ -890,9 +837,15 @@ const App: React.FC = () => {
           </button>
         </div>
 
-        <div className="iso-sidebar-section theme-list">
+        <div
+          className="iso-sidebar-section"
+          style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}
+        >
           <div className="iso-sidebar-section-title">테마 목록</div>
-          <ul className="iso-sidebar-conv-list">
+          <ul
+            className="iso-sidebar-conv-list"
+            style={{ flex: 1, minHeight: 0, overflowY: "auto" }}
+          >
             {conversations.map((c) => (
               <li
                 key={c.id}
@@ -970,7 +923,8 @@ const App: React.FC = () => {
                   </div>
                   <div className="iso-sidebar-conv-meta">
                     {(() => {
-                      // createdAt 예: '2025. 11. 22. 오후 6:56:10'
+                      // Extract date (YYYY. MM. DD.) and 오전/오후 HH:MM from c.createdAt
+                      // Example: '2025. 11. 22. 오후 6:56:10'
                       const dateMatch = c.createdAt.match(
                         /^(\d{4}\. ?\d{1,2}\. ?\d{1,2}\.)/
                       );
@@ -1019,7 +973,7 @@ const App: React.FC = () => {
         </div>
       </aside>
 
-      {/* 우측 메인 */}
+      {/* 메인 */}
       <main className="iso-main">
         <div className="iso-main-card">
           <div className="iso-main-card-header">
@@ -1081,6 +1035,18 @@ const App: React.FC = () => {
                       "iso-answer-btn" + (answerMode === "strict" ? " active" : "")
                     }
                     onClick={() => setAnswerMode("strict")}
+                    style={{
+                      borderRadius: 999,
+                      fontWeight: 600,
+                      padding: "6px 18px",
+                      background:
+                        answerMode === "strict" ? "#5b21b6" : "#ede9fe",
+                      color: answerMode === "strict" ? "#fff" : "#5b21b6",
+                      border: 0,
+                      fontSize: 13,
+                      minWidth: 80,
+                      transition: "background 0.2s, color 0.2s",
+                    }}
                   >
                     보수형
                   </button>
@@ -1110,6 +1076,18 @@ const App: React.FC = () => {
                       (answerMode === "aggressive" ? " active" : "")
                     }
                     onClick={() => setAnswerMode("aggressive")}
+                    style={{
+                      borderRadius: 999,
+                      fontWeight: 600,
+                      padding: "6px 18px",
+                      background:
+                        answerMode === "aggressive" ? "#5b21b6" : "#ede9fe",
+                      color: answerMode === "aggressive" ? "#fff" : "#5b21b6",
+                      border: 0,
+                      fontSize: 13,
+                      minWidth: 80,
+                      transition: "background 0.2s, color 0.2s",
+                    }}
                   >
                     적극형
                   </button>
@@ -1142,7 +1120,13 @@ const App: React.FC = () => {
 
           {/* 파일 버튼 */}
           <div
-            className="attach-bar"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              marginTop: 6,
+              marginBottom: 4,
+              gap: 6,
+            }}
           >
             <button
               type="button"
@@ -1162,7 +1146,7 @@ const App: React.FC = () => {
             >
               <ClipIcon />
             </button>
-            <span>
+            <span style={{ fontSize: 11, color: "#6b7280" }}>
               파일/이미지를 드래그하거나 아이콘을 눌러 첨부할 수 있습니다.
             </span>
             <input
@@ -1205,7 +1189,7 @@ const App: React.FC = () => {
         </div>
       </main>
 
-      {/* 지침/가이드 플로팅 패널 */}
+      {/* 지침/가이드 패널 */}
       <GuidePanel
         isOpen={isGuidePanelOpen}
         onClose={() => setIsGuidePanelOpen(false)}
@@ -1221,3 +1205,4 @@ const App: React.FC = () => {
 };
 
 export default App;
+
