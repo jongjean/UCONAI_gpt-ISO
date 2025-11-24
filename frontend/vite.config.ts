@@ -1,14 +1,16 @@
-import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react';
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react-swc";
 
-// https://vitejs.dev/config/
 export default defineConfig({
+  base: "/iso/",   // ★ 중요: 하위 경로에 맞춰줌
   plugins: [react()],
   server: {
+    port: 5173,
     proxy: {
-      // 프론트에서 /api 로 시작하는 요청은
-      // 백엔드 http://localhost:4400 으로 전달
-      '/api': 'http://localhost:4400',
-    },
-  },
+      "/api": {
+        target: "http://localhost:4400",
+        changeOrigin: true
+      }
+    }
+  }
 });

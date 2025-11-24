@@ -1,494 +1,18 @@
-.iso-sidebar-conv-toprow {
-  display: flex;
-  flex-direction: row;
-  align-items: flex-start;
-  justify-content: flex-end;
-  gap: 4px;
-  position: relative;
-  min-height: 16px;
-}
-.iso-sidebar-conv-meta {
-  position: static;
-  z-index: 1;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 11px;
-  color: #9ca3af;
-  margin-top: 0;
-  margin-bottom: 2px;
-}
-.iso-sidebar-conv-title {
-  position: relative;
-  z-index: 1;
-  display: block;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 13px;
-  font-weight: 600;
-  margin-bottom: 0;
-}
-/* Hide focus ring and border on click/focus */
-/* 테마 삭제 X 버튼 */
-.iso-sidebar-conv-xbtn {
-  position: absolute;
-  right: 0;
-  top: 0;
-  width: 14px;
-  height: 14px;
-  min-width: 0;
-  min-height: 0;
-  border: none;
-  background: none;
-  color: #9ca3af;
-  font-weight: 700;
-  font-size: 10px;
-  cursor: pointer;
-  line-height: 1;
-  z-index: 99;
-  padding: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
+/* ===================== */
+/*   Global Base Style   */
+/* ===================== */
 
-/* ===== 기본 설정 ===== */
 :root {
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
-    sans-serif;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color: #111827;
   background-color: #0f172a;
 }
 
-  * {
-    box-sizing: border-box;
-  }
-
-  html, body {
-    margin: 0;
-    padding: 0;
-    height: 100%;
-  }
-
-  body {
-    overflow: hidden; /* 글로벌 스크롤 숨기고, 내부에서만 스크롤 */
-  }
-
-  /* Vite 기본 root */
-  #root {
-    height: 100vh;
-  }
-
-  /* ===== 전체 레이아웃 (좌측/우측 프레임) ===== */
-
-  .iso-app-root {
-    display: flex;
-    height: 100vh;       /* 브라우저 높이에 딱 맞춤 */
-    min-height: 100vh;
-    background: radial-gradient(circle at top left, #f5f3ff 0, #e5e7eb 40%, #e5e7eb 100%);
-  }
-
-  /* ===== Sidebar (좌측 테마 리스트 프레임) ===== */
-
-  .iso-sidebar {
-    height: 100vh;       /* 상·하단에 딱 붙음 */
-    width: 260px;
-    background: #020617;
-    color: #e5e7eb;
-    padding: 20px 18px;  /* 위/아래 20px 여백 */
-    box-sizing: border-box;
-    display: flex;
-    flex-direction: column;
-    gap: 20px;
-    min-height: 0;
-    flex-shrink: 0;
-  }
-
-  /* 헤더 영역 (타이틀, 설명, 새 테마 버튼) */
-  .iso-sidebar-header {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .iso-sidebar-title {
-    font-size: 16px;
-    font-weight: 700;
-  }
-
-  .iso-sidebar-sub {
-    font-size: 12px;
-    color: #9ca3af;
-    line-height: 1.4;
-  }
-
-  .iso-sidebar-new-btn {
-    margin-top: 8px;
-    width: 100%;
-    border: none;
-    border-radius: 999px;
-    padding: 8px 10px;
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-    background: linear-gradient(90deg, #8b5cf6, #ec4899);
-    color: white;
-  }
-
-  .iso-sidebar-new-btn:hover {
-    opacity: 0.9;
-  }
-
-  /* 공통 섹션 스타일 */
-  .iso-sidebar-section {
-    font-size: 13px;
-  }
-
-  .iso-sidebar-section-title {
-    font-weight: 600;
-    margin-bottom: 6px;
-  }
-
-  /* 대화방 리스트 영역만 flex:1 + 스크롤 */
-  .iso-sidebar-section.theme-list {
-    flex: 1;
-    min-height: 0;
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-  }
-
-  /* 대화 리스트 */
-
-  .iso-sidebar-conv-list {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-
-  .iso-sidebar-conv-item {
-    border-radius: 10px;
-    padding: 8px 10px;
-    background: #020617;
-    border: 1px solid transparent;
-    cursor: pointer;
-    position: relative;
-    overflow: visible;
-  }
-
-  .iso-sidebar-conv-item.active {
-    background: #111827;
-    border-color: #6366f1;
-  }
-
-  .iso-sidebar-conv-title {
-    position: relative;
-    z-index: 1;
-    display: block;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    font-size: 13px;
-    font-weight: 600;
-    margin-bottom: 0;
-  }
-
-  .iso-sidebar-conv-meta {
-    position: relative;
-    z-index: 1;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    font-size: 11px;
-    color: #9ca3af;
-    margin-top: 2px;
-  }
-
-  /* 테마 삭제 X 버튼 */
-  .iso-sidebar-conv-xbtn {
-    position: absolute;
-    right: 0;
-    top: 0;
-    width: 14px;
-    height: 14px;
-    min-width: 0;
-    min-height: 0;
-    border: none;
-    background: none;
-    color: #9ca3af;
-    font-weight: 700;
-    font-size: 10px;
-    cursor: pointer;
-    line-height: 1;
-    z-index: 99;
-    padding: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    pointer-events: auto;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
-  }
-
-  .iso-sidebar-conv-xbtn:focus,
-  .iso-sidebar-conv-xbtn:active {
-    outline: none !important;
-    box-shadow: none !important;
-    border: none !important;
-  }
-
-  /* 지침/가이드 섹션은 항상 맨 아래 정렬 */
-  .iso-sidebar-section.guides {
-    font-size: 12px;
-    margin-top: auto;
-  }
-
-  .iso-sidebar-guides-desc {
-    margin-top: 6px;
-    color: #9ca3af;
-    line-height: 1.4;
-  }
-
-  /* ===== Main (우측 대화창 프레임) ===== */
-
-  /* 우측 전체: 브라우저 상·하단에 딱 붙고, 카드와 10px 간격 유지 */
-  .iso-main {
-    flex: 1;
-    height: 100vh;          /* 상·하단에 고정 */
-    padding: 10px;          /* 브라우저 끝선과 카드 사이 10px */
-    box-sizing: border-box;
-    display: flex;
-    justify-content: center;
-    align-items: stretch;   /* 세로로 카드가 전체 높이를 채우도록 */
-    background: #f9fafb;
-  }
-
-  /* 중앙 카드: 둥근 모서리 + 그림자, 내부 flex 레이아웃 */
-  .iso-main-card {
-    flex: 1;
-    max-width: 900px;
-    min-width: 320px;
-    height: 100%;           /* 부모(.iso-main)가 가진 높이(= 100vh - padding)에 맞춤 */
-
-    margin: 0;
-    background: #fff;
-    border-radius: 24px;
-    box-shadow: 0 24px 60px rgba(15, 23, 42, 0.25);
-
-    display: flex;
-    flex-direction: column;
-    box-sizing: border-box;
-
-    padding: 10px 24px 10px 24px;   /* 내부 상/하 10px, 좌/우 24px */
-    gap: 12px;
-    overflow: hidden;               /* 내부 스크롤은 채팅/리스트에 위임 */
-  }
-
-  /* ===== 상단 헤더/컨트롤 영역 ===== */
-
-  .iso-main-card-header {
-    margin: 0;
-    flex-shrink: 0;
-  }
-
-  .iso-main-title {
-    font-size: 22px;
-    font-weight: 800;
-    margin: 0;
-  }
-
-  .iso-main-subtitle {
-    font-size: 12px;
-    color: #6b7280;
-    margin-top: 4px;
-  }
-
-  /* 모델 / 실행 방식 컨트롤 */
-  .iso-main-controls {
-    display: flex;
-    gap: 10px;
-    flex-shrink: 0;
-  }
-
-  .iso-main-control {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-
-  .iso-label {
-    font-size: 11px;
-    font-weight: 600;
-    color: #6b7280;
-  }
-
-  .iso-main-control select {
-    border-radius: 999px;
-    border: 1px solid #e5e7eb;
-    padding: 6px 10px;
-    font-size: 13px;
-    outline: none;
-  }
-
-  .iso-main-control select:focus {
-    border-color: #8b5cf6;
-    box-shadow: 0 0 0 1px rgba(139, 92, 246, 0.3);
-  }
-
-  /* 답변 모드 버튼 공통 클래스 */
-  .iso-answer-btn {
-    border-radius: 999px;
-    border: none;
-    padding: 6px 18px;
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-    background: #ede9fe;
-    color: #5b21b6;
-    min-width: 80px;
-    transition: background 0.2s, color 0.2s;
-  }
-
-  .iso-answer-btn.active {
-    background: #5b21b6;
-    color: #ffffff;
-  }
-
-  .iso-main-description {
-    font-size: 11px;
-    color: #6b7280;
-    flex-shrink: 0;
-  }
-
-  /* ===== 대화 영역 ===== */
-
-  .iso-main-chat {
-    flex: 1 1 auto;          /* 중앙 영역이 여유 공간을 모두 사용 */
-    min-height: 0;           /* flex 컨테이너 안에서 스크롤 가능하게 */
-    border-radius: 16px;
-    border: 1px solid #e5e7eb;
-    padding: 10px 12px;
-    overflow-y: auto;        /* 여기서만 세로 스크롤 */
-    background: #f9fafb;
-    margin: 0;
-  }
-
-  .iso-chat-empty {
-    font-size: 13px;
-    color: #9ca3af;
-  }
-
-  .iso-chat-messages {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .iso-chat-bubble {
-    max-width: 100%;
-    padding: 8px 10px;
-    border-radius: 12px;
-    font-size: 13px;
-    line-height: 1.5;
-    white-space: pre-wrap;
-  }
-
-  .iso-chat-bubble.user {
-    align-self: flex-end;
-    background: #eef2ff;
-  }
-
-  .iso-chat-bubble.ai {
-    align-self: flex-start;
-    background: #f3f4f6;
-  }
-
-  .iso-chat-bubble-content {
-    font-size: 13px;
-  }
-
-  /* ===== 에러 메시지 ===== */
-
-  .iso-error {
-    font-size: 11px;
-    color: #b91c1c;
-    background: #fee2e2;
-    border-radius: 8px;
-    padding: 6px 8px;
-    flex-shrink: 0;
-  }
-
-  /* ===== 첨부 바 ===== */
-
-  .attach-bar {
-    font-size: 11px;
-    color: #6b7280;
-    margin-top: 6px;
-    margin-bottom: 4px;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex-shrink: 0;
-  }
-
-  /* ===== 입력 폼 (카드 내부 맨 아래) ===== */
-
-  .iso-input-form {
-    position: static;        /* fixed 사용 안 함 – 카드 내부 아이템 */
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    flex-shrink: 0;          /* 높이가 줄어들지 않도록 */
-  }
-
-  .iso-textarea {
-    width: 100%;
-    min-height: 80px;
-    max-height: 160px;       /* 너무 커지는 것 방지 (필요 시 조정) */
-    resize: vertical;
-    padding: 8px 10px;
-    border-radius: 12px;
-    border: 1px solid #e5e7eb;
-    font-size: 13px;
-    box-sizing: border-box;
-    outline: none;
-  }
-
-  .iso-textarea:focus {
-    border-color: #a855f7;
-    box-shadow: 0 0 0 1px rgba(168, 85, 247, 0.25);
-  }
-
-  .iso-submit-btn {
-    width: 100%;
-    border-radius: 999px;
-    border: none;
-    padding: 8px 10px;
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-    background: #5b21b6;
-    color: #fff;
-    margin-top: 4px;
-    margin-bottom: 0;        /* 카드 padding-bottom이 10px이라 충분 */
-  }
-
-  .iso-submit-btn:hover:not(:disabled) {
-    background: #4c1d95;
-  }
-
-  .iso-submit-btn:disabled {
-    background: #5b21b6;
-    color: #fff;
-    cursor: default;
-  }
-/* (문법 오류 및 중복 제거, 올바른 블록 구조 복원) */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
 
 body {
   margin: 0;
@@ -496,19 +20,21 @@ body {
   overflow: hidden;
 }
 
+/* ===================== */
+/*   3-Column Layout     */
+/* ===================== */
+
 .iso-app-root {
   display: flex;
   min-height: 100vh;
   background: radial-gradient(circle at top left, #f5f3ff 0, #e5e7eb 40%, #e5e7eb 100%);
 }
 
-/* ====== Sidebar ====== */
+/* ========== Left Sidebar (Conversation List) ========== */
 
 .iso-sidebar {
-      padding-top: 20px;
-      padding-bottom: 20px;
-    height: 100vh;
   width: 260px;
+  height: 100vh;
   background: #020617;
   color: #e5e7eb;
   padding: 20px 18px;
@@ -557,6 +83,15 @@ body {
   font-size: 13px;
 }
 
+/* 대화방 리스트 영역만 flex:1, 스크롤 */
+.iso-sidebar-section.theme-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
 .iso-sidebar-section-title {
   font-weight: 600;
   margin-bottom: 6px;
@@ -578,7 +113,7 @@ body {
   border: 1px solid transparent;
   cursor: pointer;
   position: relative;
-  overflow: visible;
+  overflow: hidden;
 }
 
 .iso-sidebar-conv-item.active {
@@ -587,14 +122,58 @@ body {
 }
 
 .iso-sidebar-conv-title {
+  position: relative;
+  z-index: 1;
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-size: 13px;
   font-weight: 600;
+  margin-bottom: 0;
 }
 
 .iso-sidebar-conv-meta {
+  position: relative;
+  z-index: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-size: 11px;
   color: #9ca3af;
   margin-top: 2px;
+}
+
+/* 삭제(X) 버튼 */
+
+.iso-sidebar-conv-xbtn {
+  position: absolute;
+  right: 0;
+  top: 0;
+  width: 14px;
+  height: 14px;
+  min-width: 0;
+  min-height: 0;
+  border: none;
+  background: none;
+  color: #9ca3af;
+  font-weight: 700;
+  font-size: 10px;
+  cursor: pointer;
+  line-height: 1;
+  z-index: 99;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+}
+
+.iso-sidebar-conv-xbtn:focus,
+.iso-sidebar-conv-xbtn:active {
+  outline: none !important;
+  box-shadow: none !important;
+  border: none !important;
 }
 
 .iso-sidebar-section.guides {
@@ -608,39 +187,106 @@ body {
   line-height: 1.4;
 }
 
-/* ====== Main ====== */
+/* ========== Right Sidebar (Function Panel) ========== */
+
+.iso-rightbar {
+  width: 260px;
+  height: 100vh;
+  background: #020617;
+  color: #e5e7eb;
+  padding: 20px 18px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+
+.iso-rightbar-header {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.iso-rightbar-main {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-right: 2px; /* 스크롤바와 여백 */
+}
+
+.iso-rightbar-section {
+  font-size: 12px;
+  border-radius: 12px;
+  padding: 10px 10px;
+  background: #020617;
+  border: 1px solid #111827;
+}
+
+.iso-rightbar-section-title {
+  font-weight: 600;
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+
+.iso-rightbar-section + .iso-rightbar-section {
+  margin-top: 4px;
+}
+
+.iso-rightbar-badge {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 11px;
+  background: #111827;
+  color: #e5e7eb;
+  margin-right: 4px;
+  margin-bottom: 4px;
+}
+
+.iso-rightbar-files {
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+/* ===================== */
+/*   Main Chat Column    */
+/* ===================== */
 
 .iso-main {
   flex: 1;
   height: 100vh;
   display: flex;
-  align-items: center;
+  align-items: stretch;
   justify-content: center;
   background: #f9fafb;
+  padding: 0 24px;
+  box-sizing: border-box;
 }
 
 .iso-main-card {
-    padding-bottom: 80px;
   width: 100%;
   max-width: 900px;
   min-width: 320px;
-  height: calc(100vh - 20px);
+  height: calc(100vh - 20px); /* 위 10px, 아래 10px */
   margin: 10px 0;
-  background: #fff;
+  background: #ffffff;
   border-radius: 24px;
   box-shadow: 0 24px 60px rgba(15, 23, 42, 0.25);
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
-  padding: 10px 24px 10px 24px;
-  gap: 14px;
+  padding: 10px 24px 10px 24px; /* 상/하 10px 유지 */
+  gap: 10px;
   overflow: hidden;
   position: relative;
 }
 
 .iso-main-card-header {
-    margin-top: 0;
-    margin-bottom: 0;
+  margin-top: 0;
+  margin-bottom: 0;
   text-align: left;
 }
 
@@ -656,7 +302,12 @@ body {
   margin-top: 4px;
 }
 
-/* 모델/실행 방식 */
+.iso-main-description {
+  font-size: 11px;
+  color: #6b7280;
+}
+
+/* 모델/실행 방식/답변 모드 공통 레이아웃 (우측 패널에서 사용) */
 
 .iso-main-controls {
   display: flex;
@@ -673,15 +324,17 @@ body {
 .iso-label {
   font-size: 11px;
   font-weight: 600;
-  color: #6b7280;
+  color: #9ca3af;
 }
 
 .iso-main-control select {
   border-radius: 999px;
-  border: 1px solid #e5e7eb;
+  border: 1px solid #374151;
   padding: 6px 10px;
   font-size: 13px;
   outline: none;
+  background: #020617;
+  color: #e5e7eb;
 }
 
 .iso-main-control select:focus {
@@ -689,9 +342,20 @@ body {
   box-shadow: 0 0 0 1px rgba(139, 92, 246, 0.3);
 }
 
-.iso-main-description {
-  font-size: 11px;
-  color: #6b7280;
+/* 답변 모드 버튼 */
+
+.iso-answer-btn {
+  border-radius: 999px;
+  border: none;
+  padding: 6px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.iso-answer-btn.active {
+  background: #5b21b6;
+  color: #ffffff;
 }
 
 /* 대화 영역 */
@@ -704,7 +368,8 @@ body {
   padding: 10px 12px;
   overflow-y: auto;
   background: #f9fafb;
-  margin-bottom: 80px;
+  margin-top: 4px;
+  margin-bottom: 4px;
 }
 
 .iso-chat-empty {
@@ -737,13 +402,6 @@ body {
   background: #f3f4f6;
 }
 
-.iso-chat-bubble-role {
-  font-size: 11px;
-  font-weight: 600;
-  margin-bottom: 2px;
-  color: #6b7280;
-}
-
 .iso-chat-bubble-content {
   font-size: 13px;
 }
@@ -758,25 +416,28 @@ body {
   padding: 6px 8px;
 }
 
-/* 입력 폼 */
+/* 첨부 바(아이콘 + 안내 텍스트) */
 
+.attach-bar {
+  display: flex;
+  align-items: center;
+  margin-top: 6px;
+  margin-bottom: 4px;
+  gap: 6px;
+  font-size: 11px;
+  color: #6b7280;
+}
+
+/* 입력 폼: 카드 내부 하단에 고정된 구조 (flex 기반, fixed 아님) */
 
 .iso-input-form {
-    margin-bottom: 0;
-    padding: 0;
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 10px;
-  z-index: 1000;
-  background: #fff;
+  margin-top: 4px;
+  margin-bottom: 0;
+  padding: 0;
+  width: 100%;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  box-shadow: none;
-  border-radius: 0;
-  padding: 0;
-  margin: 0;
 }
 
 .iso-textarea {
@@ -805,62 +466,67 @@ body {
   font-weight: 600;
   cursor: pointer;
   background: #5b21b6;
-  color: #fff;
-  opacity: 1 !important;
-  margin-top: auto;
-  margin-bottom: 10px !important;
+  color: #ffffff;
 }
 
 .iso-submit-btn:hover:not(:disabled) {
   background: #4c1d95;
-  color: #fff;
-  opacity: 1 !important;
+  color: #ffffff;
 }
 
 .iso-submit-btn:disabled {
   background: #5b21b6;
-  color: #fff;
-  opacity: 1 !important;
+  color: #ffffff;
   cursor: default;
 }
 
-/* === FORCE ATTACH PANEL TO BE VISIBLE === */
-.iso-main-chat {
-  max-height: calc(100vh - 380px) !important;
-  overflow-y: auto;
+/* 첨부파일 태그 느낌 */
+
+.iso-attached-file-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: #e5e7eb;
+  margin-right: 4px;
+  margin-bottom: 2px;
+  font-size: 11px;
+  color: #374151;
 }
 
-.iso-main-card {
-  padding-bottom: 80px !important;
+/* ===================== */
+/*   Guide Panel Modal   */
+/* ===================== */
+
+.iso-guide-pill {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: #1f2937;
+  color: #e5e7eb;
+  font-size: 11px;
 }
 
-/* 파일첨부 영역 강제 보이기 */
-.iso-input-form {
-  position: relative;
-  z-index: 20;
-  background: #ffffff;
+/* 간단한 스크롤바 스타일 (선택 사항) */
+
+.iso-main-chat::-webkit-scrollbar,
+.iso-sidebar-section.theme-list::-webkit-scrollbar,
+.iso-rightbar-files::-webkit-scrollbar,
+.iso-rightbar-main::-webkit-scrollbar {
+  width: 6px;
 }
 
-/* 입력폼 바닥 완전 밀착 추가 패치 */
-.iso-main {
-  overflow: visible !important;
-  position: static !important;
+.iso-main-chat::-webkit-scrollbar-track,
+.iso-sidebar-section.theme-list::-webkit-scrollbar-track,
+.iso-rightbar-files::-webkit-scrollbar-track,
+.iso-rightbar-main::-webkit-scrollbar-track {
+  background: transparent;
 }
 
-.iso-main-card {
-  padding-bottom: 0 !important;
-  margin-bottom: 10px !important;
-  overflow: visible !important;
-  position: static !important;
-}
-
-.iso-input-form {
-  z-index: 9999 !important;
-}
-
-.attach-bar {
-  position: relative;
-  z-index: 30;
-  background: #ffffff;
-  padding: 6px 0;
+.iso-main-chat::-webkit-scrollbar-thumb,
+.iso-sidebar-section.theme-list::-webkit-scrollbar-thumb,
+.iso-rightbar-files::-webkit-scrollbar-thumb,
+.iso-rightbar-main::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.8);
+  border-radius: 999px;
 }

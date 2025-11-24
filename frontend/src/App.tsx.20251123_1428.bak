@@ -1,6 +1,0 @@
-import React, { useEffect, useRef, useState } from "react";
-import "./App.css";
-
-// ===== API ENDPOINT BASE URL =====
-// ...existing code...
-export default App;
