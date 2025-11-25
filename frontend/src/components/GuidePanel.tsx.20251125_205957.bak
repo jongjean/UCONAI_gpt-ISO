@@ -1,7 +1,6 @@
 // src/components/GuidePanel.tsx
 import React, { useEffect, useRef, useState } from "react";
 import { Guide, GuideFile } from "../types/isoChat";
-import "./GuidePanel.scrollbar.css";
 
 export type GuidePanelProps = {
   isOpen: boolean;
@@ -417,10 +416,10 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
             flex: 1,
             display: "flex",
             gap: 16,
-            minHeight: 0,
+            minHeight: 260,
             minWidth: 0,
-            height: "100%",
             overflow: "hidden",
+            height: 0,
           }}
         >
           {/* 좌측: 리스트 */}
@@ -433,7 +432,6 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
               flexDirection: "column",
               minHeight: 0,
               height: "100%",
-              overflow: "hidden",
             }}
           >
             <button
@@ -453,10 +451,12 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
             >
               + 새 지침 추가
             </button>
+
             <div
               style={{
-                height: "100%",
-                minHeight: 0,
+                flex: 1,
+                borderRadius: 10,
+                border: "1px solid #1f2937",
                 background: "#020617",
                 overflowY: "auto",
                 overflowX: "auto",
@@ -464,8 +464,10 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
                 maxWidth: "100%",
                 boxSizing: "border-box",
                 whiteSpace: "nowrap",
+                minHeight: 0,
+                height: 0,
+                maxHeight: 32,
               }}
-              className="guide-list-scrollbox"
             >
               {currentList.length === 0 ? (
                 <div
@@ -481,30 +483,28 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
                 currentList.map((g) => (
                   <div
                     key={g.id}
-                    className={`guide-list-item${editing && editing.id === g.id ? " selected" : ""}`}
+                    onClick={() => setEditing(g)}
                     style={{
+                      padding: "8px 10px",
+                      borderBottom: "1px solid #1f2937",
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "space-between",
-                      padding: "0 8px",
-                      borderBottom: "1px solid #1e293b",
                       cursor: "pointer",
-                      background: editing && editing.id === g.id ? "#312e81" : "transparent",
-                      color: editing && editing.id === g.id ? "#f9fafb" : "#d1d5db",
-                      fontWeight: editing && editing.id === g.id ? 600 : 400,
-                      fontSize: 13,
-                      height: 24,
-                      minHeight: 0,
-                      transition: "background 0.15s",
+                      background:
+                        editing && editing.id === g.id
+                          ? "rgba(129,140,248,0.18)"
+                          : "transparent",
                     }}
-                    onClick={() => setEditing(g)}
                   >
                     <span
                       style={{
+                        fontSize: 13,
+                        color: "#e5e7eb",
                         overflow: "hidden",
-                        textOverflow: "ellipsis",
                         whiteSpace: "nowrap",
-                        flex: 1,
+                        textOverflow: "ellipsis",
+                        maxWidth: "85%",
                       }}
                     >
                       {g.title || "(제목 없음)"}
@@ -513,20 +513,20 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
-                        onDeleteGuide(g.id, tab);
+                        onDeleteGuide(g.id, g.scope);
+                        if (editing && editing.id === g.id) {
+                          setEditing(null);
+                        }
                       }}
                       style={{
-                        marginLeft: 4,
                         border: 0,
                         background: "transparent",
                         color: "#f97373",
-                        cursor: "pointer",
                         fontSize: 14,
                         fontWeight: 700,
-                        height: 24,
-                        lineHeight: "24px",
-                        padding: 0,
+                        cursor: "pointer",
                       }}
+                      aria-label="지침 삭제"
                     >
                       ×
                     </button>
@@ -542,9 +542,9 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
               flex: "1 1 0%",
               minWidth: 0,
               minHeight: 0,
-              height: "100%",
               display: "flex",
               flexDirection: "column",
+              height: "100%",
               overflow: "hidden",
             }}
           >
@@ -557,7 +557,7 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
                   minHeight: 0,
                   minWidth: 0,
                   height: "100%",
-                  overflow: "auto",
+                  overflow: "hidden",
                 }}
               >
                 <input

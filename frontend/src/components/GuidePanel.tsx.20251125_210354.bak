@@ -1,7 +1,6 @@
 // src/components/GuidePanel.tsx
 import React, { useEffect, useRef, useState } from "react";
 import { Guide, GuideFile } from "../types/isoChat";
-import "./GuidePanel.scrollbar.css";
 
 export type GuidePanelProps = {
   isOpen: boolean;
@@ -417,10 +416,10 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
             flex: 1,
             display: "flex",
             gap: 16,
-            minHeight: 0,
+            minHeight: 260,
             minWidth: 0,
-            height: "100%",
             overflow: "hidden",
+            height: 0,
           }}
         >
           {/* 좌측: 리스트 */}
@@ -433,7 +432,6 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
               flexDirection: "column",
               minHeight: 0,
               height: "100%",
-              overflow: "hidden",
             }}
           >
             <button
@@ -453,10 +451,12 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
             >
               + 새 지침 추가
             </button>
+
             <div
               style={{
-                height: "100%",
-                minHeight: 0,
+                flex: 1,
+                borderRadius: 10,
+                border: "1px solid #1f2937",
                 background: "#020617",
                 overflowY: "auto",
                 overflowX: "auto",
@@ -464,8 +464,10 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
                 maxWidth: "100%",
                 boxSizing: "border-box",
                 whiteSpace: "nowrap",
+                minHeight: 0,
+                height: 0,
+                maxHeight: 120,
               }}
-              className="guide-list-scrollbox"
             >
               {currentList.length === 0 ? (
                 <div
@@ -542,9 +544,9 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
               flex: "1 1 0%",
               minWidth: 0,
               minHeight: 0,
-              height: "100%",
               display: "flex",
               flexDirection: "column",
+              height: "100%",
               overflow: "hidden",
             }}
           >
@@ -557,7 +559,7 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
                   minHeight: 0,
                   minWidth: 0,
                   height: "100%",
-                  overflow: "auto",
+                  overflow: "hidden",
                 }}
               >
                 <input

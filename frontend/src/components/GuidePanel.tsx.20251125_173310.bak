@@ -1,0 +1,527 @@
+// src/components/GuidePanel.tsx
+import React, { useEffect, useRef, useState } from "react";
+import { Guide, GuideFile } from "../types/isoChat";
+import GuideList from "./GuideList";
+import GuideEditor from "./GuideEditor";
+
+export type GuidePanelProps = {
+  isOpen: boolean;
+  onClose: () => void;
+  globalGuides: Guide[];
+  conversationGuides: Guide[]; // 현재 활성 대화방의 지침 리스트
+  activeConversationId: string | null;
+  onCreateGuide: (scope: "global" | "conversation") => void;
+  onUpdateGuide: (guide: Guide) => void;
+  onDeleteGuide: (id: string, scope: "global" | "conversation") => void;
+  setGlobalGuides: React.Dispatch<React.SetStateAction<Guide[]>>;
+  setConversationGuides: React.Dispatch<
+    React.SetStateAction<Record<string, Guide[]>>
+  >;
+};
+
+const GuidePanel: React.FC<GuidePanelProps> = ({
+  isOpen,
+  onClose,
+  globalGuides,
+  conversationGuides,
+  activeConversationId,
+  onCreateGuide,
+  onUpdateGuide,
+  onDeleteGuide,
+  setGlobalGuides,
+  setConversationGuides,
+}) => {
+  const [tab, setTab] = useState<"global" | "conversation">("global");
+  const [editing, setEditing] = useState<Guide | null>(null);
+
+  // 드래그 이동 상태
+  const [pos, setPos] = useState<{ x: number; y: number }>({
+    x: window.innerWidth / 2 - 360,
+    y: window.innerHeight / 2 - 320,
+  });
+  const [dragging, setDragging] = useState(false);
+  const [offset, setOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  // 리사이즈 상태
+  const [size, setSize] = useState<{ width: number; height: number }>({
+    width: 720,
+    height: 640,
+  });
+  const [resizing, setResizing] = useState(false);
+  const resizeStart = useRef<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } | null>(null);
+
+  // 드래그앤드롭 정렬 상태
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
+
+  // 현재 탭의 리스트
+  const currentList: Guide[] =
+    tab === "global" ? globalGuides : conversationGuides;
+
+  // 지침 순서 변경 시 실제 상태 업데이트
+  const onUpdateGuideOrder = (newList: Guide[], scope: "global" | "conversation") => {
+    if (scope === "global") {
+      setGlobalGuides(newList);
+    } else if (scope === "conversation" && activeConversationId) {
+      setConversationGuides((prev: Record<string, Guide[]>) => ({
+        ...prev,
+        [activeConversationId]: newList,
+      }));
+    }
+  };
+
+  const moveGuide = (from: number, to: number) => {
+    if (from === to) return;
+    const list = Array.isArray(currentList) ? [...currentList] : [];
+    const [moved] = list.splice(from, 1);
+    list.splice(to, 0, moved);
+
+    if (tab === "global") {
+      onUpdateGuideOrder(list, "global");
+    } else {
+      onUpdateGuideOrder(list, "conversation");
+    }
+
+    setDragIndex(null);
+    setHoverIndex(null);
+  };
+
+  // 리사이즈 핸들
+  const handleResizeMouseDown = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setResizing(true);
+    resizeStart.current = {
+      x: e.clientX,
+      y: e.clientY,
+      width: size.width,
+      height: size.height,
+    };
+  };
+
+  useEffect(() => {
+    if (!resizing) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!resizeStart.current) return;
+      const dx = e.clientX - resizeStart.current.x;
+      const dy = e.clientY - resizeStart.current.y;
+
+      setSize(() => {
+        const newWidth = Math.max(
+          400,
+          Math.min(resizeStart.current!.width + dx, window.innerWidth * 0.9)
+        );
+        const newHeight = Math.max(
+          300,
+          Math.min(resizeStart.current!.height + dy, window.innerHeight * 0.8)
+        );
+        return { width: newWidth, height: newHeight };
+      });
+    };
+
+    const handleMouseUp = () => {
+      setResizing(false);
+      const maxX = window.innerWidth - size.width;
+      const maxY = window.innerHeight - size.height;
+      setPos((p) => ({
+        x: Math.max(0, Math.min(p.x, maxX)),
+        y: Math.max(0, Math.min(p.y, maxY)),
+      }));
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [resizing, size.height, size.width]);
+
+  // 패널 드래그 핸들
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if (!panelRef.current) return;
+    setDragging(true);
+    setOffset({
+      x: e.clientX - pos.x,
+      y: e.clientY - pos.y,
+    });
+  };
+
+  useEffect(() => {
+    if (!dragging) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const maxX = window.innerWidth - size.width;
+      const maxY = window.innerHeight - size.height;
+      setPos({
+        x: Math.max(0, Math.min(maxX, e.clientX - offset.x)),
+        y: Math.max(0, Math.min(maxY, e.clientY - offset.y)),
+      });
+    };
+
+    const handleMouseUp = () => setDragging(false);
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [dragging, offset, size.height, size.width]);
+
+  // 패널 크기 변경 시 위치 보정
+  useEffect(() => {
+    setPos((p) => ({
+      x: Math.min(p.x, window.innerWidth - size.width),
+      y: Math.min(p.y, window.innerHeight - size.height),
+    }));
+  }, [size.width, size.height]);
+
+  // 탭/대화방 변경 시 편집 대상 초기화
+  useEffect(() => {
+    setEditing(null);
+  }, [tab, activeConversationId]);
+
+  // 새 지침 생성 시 자동 선택
+  useEffect(() => {
+    const list = tab === "global" ? globalGuides : conversationGuides;
+    if (list.length === 0 || editing) return;
+
+    const latest = [...list].sort(
+      (a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    )[0];
+
+    if (latest && !latest.title && !latest.content) {
+      setEditing(latest);
+    }
+  }, [globalGuides, conversationGuides, tab, editing]);
+
+  // 파일 첨부 로직
+  const handleAttachFilesToGuide = (files: File[]) => {
+    if (!editing) return;
+    const newFiles: GuideFile[] = files.map((f) => ({
+      id: `gf-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      name: f.name,
+      size: f.size,
+      type: f.type,
+      url: "",
+      createdAt: new Date().toISOString(),
+    }));
+    const updated: Guide = {
+      ...editing,
+      files: [...(editing.files || []), ...newFiles],
+      updatedAt: new Date().toISOString(),
+    };
+    setEditing(updated);
+    onUpdateGuide(updated);
+  };
+
+  const handleRemoveGuideFile = (fileId: string) => {
+    if (!editing) return;
+    const updated: Guide = {
+      ...editing,
+      files: (editing.files || []).filter((f) => f.id !== fileId),
+      updatedAt: new Date().toISOString(),
+    };
+    setEditing(updated);
+    onUpdateGuide(updated);
+  };
+
+  // 윈도우 전체 붙여넣기(Ctrl+V) → 현재 편집 중 지침에 파일 첨부
+  useEffect(() => {
+    const handlePaste = (e: ClipboardEvent) => {
+      if (!editing) return;
+      if (!e.clipboardData) return;
+
+      const files: File[] = Array.from(e.clipboardData.files);
+      if (files.length > 0) {
+        e.preventDefault();
+        handleAttachFilesToGuide(files);
+      }
+    };
+
+    window.addEventListener("paste", handlePaste);
+    return () => window.removeEventListener("paste", handlePaste);
+  }, [editing]);
+
+  const handleChangeTitle = (value: string) => {
+    if (!editing) return;
+    const updated: Guide = {
+      ...editing,
+      title: value,
+      updatedAt: new Date().toISOString(),
+    };
+    setEditing(updated);
+    onUpdateGuide(updated);
+  };
+
+  const handleChangeContent = (value: string) => {
+    if (!editing) return;
+    const updated: Guide = {
+      ...editing,
+      content: value,
+      updatedAt: new Date().toISOString(),
+    };
+    setEditing(updated);
+    onUpdateGuide(updated);
+  };
+
+  const handleDelete = (guideId: string) => {
+    const scope: "global" | "conversation" = tab;
+    if (!window.confirm("이 지침을 삭제하시겠습니까?")) return;
+    onDeleteGuide(guideId, scope);
+    if (editing?.id === guideId) {
+      setEditing(null);
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <>
+      {/* 어둡게 처리된 배경 */}
+      <div
+        style={{
+          position: "fixed",
+          inset: 0,
+          zIndex: 1000,
+          background: "rgba(0,0,0,0.4)",
+        }}
+        onClick={onClose}
+      />
+
+      {/* 패널 본체 */}
+      <div
+        ref={panelRef}
+        style={{
+          position: "fixed",
+          left: pos.x,
+          top: pos.y,
+          zIndex: 1001,
+          background: "#111827",
+          width: size.width,
+          height: size.height,
+          maxWidth: window.innerWidth * 0.9,
+          maxHeight: window.innerHeight * 0.8,
+          minWidth: 400,
+          minHeight: 300,
+          borderRadius: 16,
+          padding: 24,
+          color: "#fff",
+          display: "flex",
+          flexDirection: "column",
+          boxShadow: "0 8px 32px rgba(0,0,0,0.25)",
+          cursor: dragging ? "grabbing" : undefined,
+          userSelect: dragging ? "none" : undefined,
+          boxSizing: "border-box",
+        }}
+      >
+        {/* 리사이즈 핸들 */}
+        <div
+          onMouseDown={handleResizeMouseDown}
+          style={{
+            position: "absolute",
+            right: 4,
+            bottom: 4,
+            width: 24,
+            height: 24,
+            cursor: "nwse-resize",
+            zIndex: 10,
+            display: "flex",
+            alignItems: "flex-end",
+            justifyContent: "flex-end",
+            userSelect: "none",
+            color: "#aaa",
+          }}
+          title="크기 조절"
+        >
+          <span style={{ fontSize: 20, pointerEvents: "none" }}>↘</span>
+        </div>
+
+        {/* 헤더 + 드래그 핸들 */}
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: 12,
+            userSelect: "none",
+            position: "relative",
+            gap: 8,
+          }}
+        >
+          <div
+            onMouseDown={handleMouseDown}
+            style={{
+              width: 32,
+              height: 32,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              cursor: "grab",
+              marginRight: 8,
+              borderRadius: 8,
+              transition: "background 0.15s",
+              userSelect: "none",
+            }}
+            title="패널 이동"
+            tabIndex={0}
+            aria-label="패널 이동 드래그 핸들"
+          >
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 18 18"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <circle cx="5" cy="5" r="1.5" fill="#aaa" />
+              <circle cx="5" cy="9" r="1.5" fill="#aaa" />
+              <circle cx="5" cy="13" r="1.5" fill="#aaa" />
+              <circle cx="13" cy="5" r="1.5" fill="#aaa" />
+              <circle cx="13" cy="9" r="1.5" fill="#aaa" />
+              <circle cx="13" cy="13" r="1.5" fill="#aaa" />
+            </svg>
+          </div>
+
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 600, fontSize: 14 }}>지침 / 가이드 관리</div>
+            <div
+              style={{
+                fontSize: 11,
+                color: "#9ca3af",
+                marginTop: 2,
+              }}
+            >
+              프로젝트 공통 지침과 대화방별 지침을 구분해서 관리합니다.
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            style={{
+              position: "absolute",
+              right: 0,
+              top: "50%",
+              transform: "translateY(-50%)",
+              background: "#1f2937",
+              color: "#fff",
+              border: 0,
+              borderRadius: "50%",
+              width: 28,
+              height: 28,
+              fontWeight: 700,
+              fontSize: 16,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              cursor: "pointer",
+              boxShadow: "0 2px 8px rgba(0,0,0,0.10)",
+              zIndex: 2,
+              lineHeight: 1,
+              padding: 0,
+              transition: "background 0.15s",
+            }}
+            aria-label="닫기"
+          >
+            X
+          </button>
+        </div>
+
+        {/* 탭 */}
+        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+          <button
+            onClick={() => setTab("global")}
+            style={{
+              flex: 1,
+              border: 0,
+              borderRadius: 999,
+              padding: "6px 10px",
+              background: tab === "global" ? "#7c3aed" : "#1f2937",
+              color: tab === "global" ? "#fff" : "#9ca3af",
+              fontSize: 12,
+              cursor: "pointer",
+            }}
+          >
+            프로젝트 공통 지침
+          </button>
+          <button
+            onClick={() => setTab("conversation")}
+            style={{
+              flex: 1,
+              border: 0,
+              borderRadius: 999,
+              padding: "6px 10px",
+              background: tab === "conversation" ? "#7c3aed" : "#1f2937",
+              color: tab === "conversation" ? "#fff" : "#9ca3af",
+              fontSize: 12,
+              cursor: activeConversationId ? "pointer" : "not-allowed",
+              opacity: activeConversationId ? 1 : 0.5,
+            }}
+            disabled={!activeConversationId}
+          >
+            테마방 지침
+          </button>
+        </div>
+
+        {/* 본문: 좌측 리스트 / 우측 편집 */}
+        <div
+          style={{
+            display: "flex",
+            flex: 1,
+            gap: 16,
+            minHeight: 260,
+            minWidth: 0,
+          }}
+        >
+          {/* 좌측 리스트 */}
+          <GuideList
+            guides={currentList}
+            editingGuideId={editing?.id ?? null}
+            onCreateGuide={() => onCreateGuide(tab)}
+            onSelectGuide={setEditing}
+            onDeleteGuide={handleDelete}
+            dragIndex={dragIndex}
+            hoverIndex={hoverIndex}
+            onDragStart={(index) => setDragIndex(index)}
+            onDragOver={(index, e) => {
+              e.preventDefault();
+              setHoverIndex(index);
+            }}
+            onDrop={(index) => {
+              if (dragIndex !== null && dragIndex !== index) {
+                moveGuide(dragIndex, index);
+              } else {
+                setDragIndex(null);
+                setHoverIndex(null);
+              }
+            }}
+            onDragEnd={() => {
+              setDragIndex(null);
+              setHoverIndex(null);
+            }}
+          />
+
+          {/* 우측 편집기 */}
+          <GuideEditor
+            editing={editing}
+            onChangeTitle={handleChangeTitle}
+            onChangeContent={handleChangeContent}
+            onAttachFiles={handleAttachFilesToGuide}
+            onRemoveFile={handleRemoveGuideFile}
+          />
+        </div>
+      </div>
+    </>
+  );
+};
+
+export default GuidePanel;

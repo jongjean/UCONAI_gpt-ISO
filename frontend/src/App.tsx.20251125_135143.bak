@@ -370,6 +370,8 @@ const App: React.FC = () => {
         onCreateGuide={handleCreateGuide}
         onUpdateGuide={handleUpdateGuide}
         onDeleteGuide={handleDeleteGuide}
+        setGlobalGuides={setGlobalGuides}
+        setConversationGuides={setConversationGuides}
       />
     </div>
   );

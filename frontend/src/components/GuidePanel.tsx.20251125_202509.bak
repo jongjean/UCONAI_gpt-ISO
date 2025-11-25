@@ -1,13 +1,12 @@
 // src/components/GuidePanel.tsx
 import React, { useEffect, useRef, useState } from "react";
 import { Guide, GuideFile } from "../types/isoChat";
-import "./GuidePanel.scrollbar.css";
 
 export type GuidePanelProps = {
   isOpen: boolean;
   onClose: () => void;
   globalGuides: Guide[];
-  /** 현재 활성 테마의 지침 목록 */
+  /** 현재 활성 테마의 지침 목록만 전달 */
   conversationGuides: Guide[];
   activeConversationId: string | null;
   onCreateGuide: (scope: "global" | "conversation") => void;
@@ -20,16 +19,18 @@ type Tab = "global" | "conversation";
 // 파일 중복 방지를 위한 시그니처
 const fileSignature = (f: File) => `${f.name}-${f.size}-${f.lastModified}`;
 
-const GuidePanel: React.FC<GuidePanelProps> = ({
-  isOpen,
-  onClose,
-  globalGuides,
-  conversationGuides,
-  activeConversationId,
-  onCreateGuide,
-  onUpdateGuide,
-  onDeleteGuide,
-}) => {
+const GuidePanel: React.FC<GuidePanelProps> = (props) => {
+  const {
+    isOpen,
+    onClose,
+    globalGuides,
+    conversationGuides,
+    activeConversationId,
+    onCreateGuide,
+    onUpdateGuide,
+    onDeleteGuide,
+  } = props;
+
   const [tab, setTab] = useState<Tab>("global");
   const [editing, setEditing] = useState<Guide | null>(null);
 
@@ -53,9 +54,7 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
   const currentList: Guide[] =
     tab === "global" ? globalGuides : conversationGuides;
 
-  /* ------------------------------------------------
-   * 1. 기본 선택 로직 (새 지침 자동 선택 포함)
-   * ------------------------------------------------ */
+  // 처음 열릴 때 / 탭 변경 시 기본 선택
   useEffect(() => {
     if (!isOpen) {
       setEditing(null);
@@ -68,32 +67,14 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
       return;
     }
 
-    // 1순위: 방금 추가된 "비어 있는" 지침 (title/content 둘 다 없음)
-    const newestBlank = [...list]
-      .filter((g) => !g.title && !g.content)
-      .sort(
-        (a, b) =>
-          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-      )[0];
-
-    if (newestBlank && (!editing || editing.id !== newestBlank.id)) {
-      setEditing(newestBlank);
-      return;
+    // 현재 editing 이 사라졌다면 첫 번째로 교체
+    if (!editing || !list.some((g) => g.id === editing.id)) {
+      setEditing(list[0]);
     }
-
-    // 2순위: 기존 editing 이 아직 목록에 있다면 그대로 유지
-    if (editing && list.some((g) => g.id === editing.id)) {
-      return;
-    }
-
-    // 3순위: 없으면 첫 번째 항목 선택
-    setEditing(list[0]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, tab, globalGuides, conversationGuides, activeConversationId]);
 
-  /* ------------------------------------------------
-   * 2. 패널 드래그 / 리사이즈
-   * ------------------------------------------------ */
+  // 패널 드래그
   const handleDragMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
     setDragging(true);
@@ -103,6 +84,7 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
     };
   };
 
+  // 리사이즈
   const handleResizeMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -162,9 +144,7 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
     };
   }, [dragging, resizing, size.width, size.height]);
 
-  /* ------------------------------------------------
-   * 3. 파일 첨부 공통 로직 (중복 방지)
-   * ------------------------------------------------ */
+  // 파일 첨부 공통 로직 (중복 방지)
   const safeAddFiles = (files: File[]) => {
     if (!editing) return;
     if (!files.length) return;
@@ -200,21 +180,36 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
     onUpdateGuide(updated);
   };
 
-  // 패널 열려 있는 동안 전역 Ctrl+V 지원
+  // 붙여넣기 / 드롭 / input change 핸들러
+  const handlePasteBoxPaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
+    const files = Array.from(e.clipboardData.files || []);
+    if (!files.length) return;
+    e.preventDefault();
+    safeAddFiles(files);
+  };
+
+  const handlePasteGlobal = (e: ClipboardEvent) => {
+    if (!isOpen || !editing) return;
+    const files = Array.from(e.clipboardData?.files || []);
+    if (!files.length) return;
+    e.preventDefault();
+    safeAddFiles(files);
+  };
+
   useEffect(() => {
     if (!isOpen) return;
-
-    const handler = (e: ClipboardEvent) => {
-      if (!editing) return;
-      const files = Array.from(e.clipboardData?.files || []);
-      if (!files.length) return;
-      e.preventDefault();
-      safeAddFiles(files);
-    };
-
+    const handler = (e: ClipboardEvent) => handlePasteGlobal(e);
     window.addEventListener("paste", handler);
     return () => window.removeEventListener("paste", handler);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, editing]);
+
+  const handleDropBoxDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const files = Array.from(e.dataTransfer.files || []);
+    if (!files.length) return;
+    safeAddFiles(files);
+  };
 
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
@@ -235,9 +230,6 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
     onUpdateGuide(updated);
   };
 
-  /* ------------------------------------------------
-   * 4. 제목/내용 변경
-   * ------------------------------------------------ */
   const handleChangeTitle = (value: string) => {
     if (!editing) return;
     const updated: Guide = {
@@ -262,12 +254,9 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
 
   if (!isOpen) return null;
 
-  /* ------------------------------------------------
-   * 5. 렌더링
-   * ------------------------------------------------ */
   return (
     <>
-      {/* 어두운 배경 – 드래그/리사이즈 중에는 닫히지 않게 */}
+      {/* 어두운 배경 – 드래그 중에는 닫히지 않게 */}
       <div
         style={{
           position: "fixed",
@@ -417,9 +406,7 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
             flex: 1,
             display: "flex",
             gap: 16,
-            minHeight: 0,
-            minWidth: 0,
-            height: "100%",
+            minHeight: 260,
             overflow: "hidden",
           }}
         >
@@ -428,12 +415,9 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
             style={{
               flex: "0 0 260px",
               maxWidth: 300,
-              minWidth: 180,
+              minWidth: 220,
               display: "flex",
               flexDirection: "column",
-              minHeight: 0,
-              height: "100%",
-              overflow: "hidden",
             }}
           >
             <button
@@ -453,19 +437,15 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
             >
               + 새 지침 추가
             </button>
+
             <div
               style={{
-                height: "100%",
-                minHeight: 0,
+                flex: 1,
+                borderRadius: 10,
+                border: "1px solid #1f2937",
                 background: "#020617",
                 overflowY: "auto",
-                overflowX: "auto",
-                minWidth: 0,
-                maxWidth: "100%",
-                boxSizing: "border-box",
-                whiteSpace: "nowrap",
               }}
-              className="guide-list-scrollbox"
             >
               {currentList.length === 0 ? (
                 <div
@@ -481,30 +461,28 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
                 currentList.map((g) => (
                   <div
                     key={g.id}
-                    className={`guide-list-item${editing && editing.id === g.id ? " selected" : ""}`}
+                    onClick={() => setEditing(g)}
                     style={{
+                      padding: "8px 10px",
+                      borderBottom: "1px solid #1f2937",
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "space-between",
-                      padding: "0 8px",
-                      borderBottom: "1px solid #1e293b",
                       cursor: "pointer",
-                      background: editing && editing.id === g.id ? "#312e81" : "transparent",
-                      color: editing && editing.id === g.id ? "#f9fafb" : "#d1d5db",
-                      fontWeight: editing && editing.id === g.id ? 600 : 400,
-                      fontSize: 13,
-                      height: 24,
-                      minHeight: 0,
-                      transition: "background 0.15s",
+                      background:
+                        editing && editing.id === g.id
+                          ? "rgba(129,140,248,0.18)"
+                          : "transparent",
                     }}
-                    onClick={() => setEditing(g)}
                   >
                     <span
                       style={{
+                        fontSize: 13,
+                        color: "#e5e7eb",
                         overflow: "hidden",
-                        textOverflow: "ellipsis",
                         whiteSpace: "nowrap",
-                        flex: 1,
+                        textOverflow: "ellipsis",
+                        maxWidth: "85%",
                       }}
                     >
                       {g.title || "(제목 없음)"}
@@ -513,20 +491,20 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
-                        onDeleteGuide(g.id, tab);
+                        onDeleteGuide(g.id, g.scope);
+                        if (editing && editing.id === g.id) {
+                          setEditing(null);
+                        }
                       }}
                       style={{
-                        marginLeft: 4,
                         border: 0,
                         background: "transparent",
                         color: "#f97373",
-                        cursor: "pointer",
                         fontSize: 14,
                         fontWeight: 700,
-                        height: 24,
-                        lineHeight: "24px",
-                        padding: 0,
+                        cursor: "pointer",
                       }}
+                      aria-label="지침 삭제"
                     >
                       ×
                     </button>
@@ -536,30 +514,17 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
             </div>
           </div>
 
-          {/* 우측: 편집 영역 */}
+          {/* 우측: 편집 */}
           <div
             style={{
-              flex: "1 1 0%",
+              flex: "1 1 auto",
               minWidth: 0,
-              minHeight: 0,
-              height: "100%",
               display: "flex",
               flexDirection: "column",
-              overflow: "hidden",
             }}
           >
             {editing ? (
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  flex: 1,
-                  minHeight: 0,
-                  minWidth: 0,
-                  height: "100%",
-                  overflow: "auto",
-                }}
-              >
+              <>
                 <input
                   value={editing.title}
                   onChange={(e) => handleChangeTitle(e.target.value)}
@@ -575,39 +540,39 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
                     color: "#f9fafb",
                   }}
                 />
+
+                {/* 얇은 첨부 / Ctrl+V 박스 */}
                 <div
                   style={{
                     display: "flex",
-                    gap: 12,
-                    marginBottom: 10,
-                    width: "100%",
+                    justifyContent: "flex-start",
+                    marginBottom: 8,
                   }}
                 >
-                  {/* (1) 파일 첨부 박스 */}
                   <div
-                    onClick={() => fileInputRef.current?.click()}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      const items = Array.from(
-                        e.dataTransfer.files || []
-                      );
-                      if (items.length > 0) safeAddFiles(items);
-                    }}
+                    onPaste={handlePasteBoxPaste}
+                    onDrop={handleDropBoxDrop}
                     onDragOver={(e) => e.preventDefault()}
+                    onClick={() => fileInputRef.current?.click()}
                     style={{
-                      flex: 1,
                       border: "2px dashed #7c3aed",
                       borderRadius: 8,
-                      padding: "8px 10px",
-                      fontSize: 13,
-                      textAlign: "center",
+                      padding: "6px 10px",
+                      fontSize: 12,
                       color: "#d1d5db",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      height: 34,
+                      width: "48%",
+                      minWidth: 160,
                       cursor: "pointer",
-                      background: "rgba(124, 58, 237, 0.08)",
+                      background: "rgba(124,58,237,0.08)",
                       userSelect: "none",
                     }}
+                    title="클릭하여 파일 첨부, 또는 Ctrl+V / 드래그로 첨부"
                   >
-                    첨부하기
+                    첨부 / Ctrl+V
                     <input
                       ref={fileInputRef}
                       type="file"
@@ -617,32 +582,8 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
                       accept="image/*,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,.txt,.zip,.ppt,.pptx,.csv"
                     />
                   </div>
-                  {/* (2) 복사 붙여넣기 박스 (Ctrl+V) */}
-                  <div
-                    onPaste={(e) => {
-                      const items = Array.from(
-                        e.clipboardData.files || []
-                      );
-                      if (items.length > 0) {
-                        e.preventDefault();
-                        safeAddFiles(items);
-                      }
-                    }}
-                    style={{
-                      flex: 1,
-                      border: "2px dashed #7c3aed",
-                      borderRadius: 8,
-                      padding: "8px 10px",
-                      fontSize: 13,
-                      textAlign: "center",
-                      color: "#d1d5db",
-                      userSelect: "none",
-                      background: "rgba(124, 58, 237, 0.05)",
-                    }}
-                  >
-                    붙여넣기
-                  </div>
                 </div>
+
                 {/* 첨부 파일 리스트 */}
                 {editing.files && editing.files.length > 0 && (
                   <div
@@ -652,7 +593,7 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
                       borderRadius: 8,
                       border: "1px solid #1f2937",
                       background: "#020617",
-                      maxHeight: 60,
+                      maxHeight: 120,
                       overflowY: "auto",
                     }}
                   >
@@ -695,42 +636,34 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
                     ))}
                   </div>
                 )}
-                <div
+
+                <textarea
+                  value={editing.content}
+                  onChange={(e) => handleChangeContent(e.target.value)}
+                  placeholder="지침 내용 또는 ISO/법률 작성 가이드라인을 입력하세요."
                   style={{
                     flex: 1,
-                    minHeight: 0,
-                    display: "flex",
-                    flexDirection: "column",
+                    width: "100%",
+                    borderRadius: 8,
+                    border: "1px solid #1f2937",
+                    padding: 10,
+                    fontSize: 13,
+                    background: "#020617",
+                    color: "#f9fafb",
+                    resize: "none",
+                  }}
+                />
+                <div
+                  style={{
+                    marginTop: 6,
+                    fontSize: 11,
+                    color: "#9ca3af",
                   }}
                 >
-                  <textarea
-                    value={editing.content}
-                    onChange={(e) => handleChangeContent(e.target.value)}
-                    placeholder="지침/참고 내용 입력"
-                    style={{
-                      flex: 1,
-                      minHeight: 0,
-                      width: "100%",
-                      borderRadius: 8,
-                      border: "1px solid #1f2937",
-                      padding: 10,
-                      fontSize: 13,
-                      background: "#020617",
-                      color: "#f9fafb",
-                      resize: "none",
-                    }}
-                  />
-                  <div
-                    style={{
-                      marginTop: 6,
-                      fontSize: 11,
-                      color: "#9ca3af",
-                    }}
-                  >
-                    {/* 안내 문구 등 필요시 추가 */}
-                  </div>
+                  ※ PDF/워드/이미지 등은 첨부만 하고, 본문에는 핵심 규칙과
+                  요약을 텍스트로 정리하는 것을 권장합니다.
                 </div>
-              </div>
+              </>
             ) : (
               <div
                 style={{

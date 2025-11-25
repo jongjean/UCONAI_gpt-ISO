@@ -1,0 +1,628 @@
+import React, { useEffect, useRef, useState } from "react";
+import { Guide, GuideFile } from "../types/isoChat";
+
+export type GuidePanelProps = {
+  isOpen: boolean;
+  onClose: () => void;
+  globalGuides: Guide[];
+  conversationGuides: Guide[]; // activeConvGuides (App.tsx에서 전달)
+  activeConversationId: string | null;
+  onCreateGuide: (scope: "global" | "conversation") => void;
+  onUpdateGuide: (guide: Guide) => void;
+  onDeleteGuide: (id: string, scope: "global" | "conversation") => void;
+};
+
+const GuidePanel: React.FC<GuidePanelProps> = ({
+  isOpen,
+  onClose,
+  globalGuides,
+  conversationGuides,
+  activeConversationId,
+  onCreateGuide,
+  onUpdateGuide,
+  onDeleteGuide,
+}) => {
+  const [tab, setTab] = useState<"global" | "conversation">("global");
+  const [editing, setEditing] = useState<Guide | null>(null);
+
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const pasteBoxRef = useRef<HTMLDivElement | null>(null);
+
+  // 현재 탭에 따른 지침 리스트
+  const currentList: Guide[] =
+    tab === "global" ? globalGuides : conversationGuides;
+
+  // 패널이 열리거나 리스트가 바뀔 때, 기본 선택 지침 설정
+  useEffect(() => {
+    if (!isOpen) {
+      setEditing(null);
+      return;
+    }
+
+    if (editing && currentList.some((g) => g.id === editing.id)) {
+      return; // 기존 선택 유지
+    }
+
+    if (currentList.length > 0) {
+      setEditing(currentList[0]);
+    } else {
+      setEditing(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, tab, globalGuides, conversationGuides]);
+
+  // 탭 변경 시에도 리스트 기준으로 기본 선택
+  useEffect(() => {
+    if (!isOpen) return;
+    if (currentList.length > 0) {
+      setEditing(currentList[0]);
+    } else {
+      setEditing(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
+
+  if (!isOpen) return null;
+
+  /** 공통 업데이트 헬퍼 */
+  const applyGuideUpdate = (updated: Guide) => {
+    setEditing(updated);
+    onUpdateGuide(updated);
+  };
+
+  /** 제목 변경 */
+  const handleChangeTitle = (value: string) => {
+    if (!editing) return;
+    const updated: Guide = {
+      ...editing,
+      title: value,
+      updatedAt: new Date().toISOString(),
+    };
+    applyGuideUpdate(updated);
+  };
+
+  /** 내용 변경 */
+  const handleChangeContent = (value: string) => {
+    if (!editing) return;
+    const updated: Guide = {
+      ...editing,
+      content: value,
+      updatedAt: new Date().toISOString(),
+    };
+    applyGuideUpdate(updated);
+  };
+
+  /** 파일 첨부 (중복 방지 포함) */
+  const handleAttachFilesToGuide = (files: File[]) => {
+    if (!editing || files.length === 0) return;
+
+    const existing = new Set(
+      (editing.files || []).map((f) => `${f.name}-${f.size}`)
+    );
+
+    const filtered = files.filter(
+      (file) => !existing.has(`${file.name}-${file.size}`)
+    );
+    if (filtered.length === 0) return;
+
+    const now = new Date().toISOString();
+
+    const newFiles: GuideFile[] = filtered.map((file) => ({
+      id: `gf-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      name: file.name,
+      size: file.size,
+      type: file.type,
+      url: "",
+      createdAt: now,
+    }));
+
+    const updated: Guide = {
+      ...editing,
+      files: [...(editing.files || []), ...newFiles],
+      updatedAt: now,
+    };
+    applyGuideUpdate(updated);
+  };
+
+  /** 첨부 파일 삭제 */
+  const handleRemoveGuideFile = (fileId: string) => {
+    if (!editing) return;
+    const now = new Date().toISOString();
+
+    const updated: Guide = {
+      ...editing,
+      files: (editing.files || []).filter((f) => f.id !== fileId),
+      updatedAt: now,
+    };
+    applyGuideUpdate(updated);
+  };
+
+  /** Ctrl+V 붙여넣기 (붙여넣기 박스에 포커스 필요) */
+  const handlePasteFile = (e: React.ClipboardEvent<HTMLDivElement>) => {
+    const fileList = e.clipboardData.files;
+    if (!fileList || fileList.length === 0) return;
+    e.preventDefault();
+    handleAttachFilesToGuide(Array.from(fileList));
+  };
+
+  /** 드래그 드롭 */
+  const handleDropFile = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const fileList = e.dataTransfer.files;
+    if (!fileList || fileList.length === 0) return;
+    handleAttachFilesToGuide(Array.from(fileList));
+  };
+
+  /** 파일 선택 */
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const fileList = e.target.files;
+    if (!fileList || fileList.length === 0) return;
+    handleAttachFilesToGuide(Array.from(fileList));
+    e.target.value = "";
+  };
+
+  /** 지침 삭제 */
+  const handleDelete = (guideId: string, scope: "global" | "conversation") => {
+    if (!window.confirm("이 지침을 삭제하시겠습니까?")) return;
+    onDeleteGuide(guideId, scope);
+    if (editing?.id === guideId) {
+      setEditing(null);
+    }
+  };
+
+  /** 새 지침 추가 */
+  const handleClickNewGuide = () => {
+    onCreateGuide(tab);
+  };
+
+  /** 리스트 클릭 시 편집 대상 변경 */
+  const handleSelectGuide = (guide: Guide) => {
+    setEditing(guide);
+  };
+
+  /** 리스트 렌더링: 제목 + X 한 줄만 */
+  const renderGuideList = () => {
+    if (currentList.length === 0) {
+      return (
+        <div
+          style={{
+            fontSize: 12,
+            color: "#9ca3af",
+            padding: 8,
+          }}
+        >
+          아직 등록된 지침이 없습니다.
+        </div>
+      );
+    }
+
+    return (
+      <div
+        style={{
+          maxHeight: 360,
+          overflowY: "auto",
+        }}
+      >
+        {currentList.map((g) => (
+          <div
+            key={g.id}
+            style={{
+              padding: "6px 8px",
+              borderRadius: 6,
+              marginBottom: 4,
+              cursor: "pointer",
+              background:
+                editing?.id === g.id ? "#1f2937" : "transparent",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 8,
+              fontSize: 12,
+            }}
+            onClick={() => handleSelectGuide(g)}
+          >
+            <span
+              style={{
+                flex: 1,
+                minWidth: 0,
+                overflow: "hidden",
+                whiteSpace: "nowrap",
+                textOverflow: "ellipsis",
+                color: "#e5e7eb",
+              }}
+            >
+              {g.title || "(제목 없음)"}
+            </span>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleDelete(g.id, g.scope);
+              }}
+              style={{
+                border: 0,
+                background: "transparent",
+                color: "#f97373",
+                cursor: "pointer",
+                fontSize: 14,
+                fontWeight: 700,
+                padding: 0,
+              }}
+              aria-label="지침 삭제"
+              title="지침 삭제"
+            >
+              ×
+            </button>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  /** 첨부 파일 리스트 */
+  const renderAttachedFiles = () => {
+    if (!editing?.files || editing.files.length === 0) return null;
+
+    return (
+      <div
+        style={{
+          marginTop: 6,
+          marginBottom: 8,
+          padding: 8,
+          borderRadius: 6,
+          border: "1px solid #1f2937",
+          background: "#020617",
+          maxHeight: 120,
+          overflowY: "auto",
+        }}
+      >
+        {editing.files.map((file) => (
+          <div
+            key={file.id}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              fontSize: 11,
+              padding: "2px 0",
+              borderBottom: "1px solid #111827",
+            }}
+          >
+            <span
+              style={{
+                maxWidth: 220,
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+            >
+              {file.name}
+            </span>
+            <button
+              type="button"
+              onClick={() => handleRemoveGuideFile(file.id)}
+              style={{
+                border: 0,
+                background: "transparent",
+                color: "#f97373",
+                cursor: "pointer",
+                fontSize: 11,
+              }}
+            >
+              삭제
+            </button>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  return (
+    <>
+      {/* 배경 오버레이 */}
+      <div
+        style={{
+          position: "fixed",
+          inset: 0,
+          zIndex: 1000,
+          background: "rgba(0,0,0,0.4)",
+        }}
+        onClick={onClose}
+      />
+      {/* 패널 본체 (고정 모달, 드래그/리사이즈는 나중 단계) */}
+      <div
+        style={{
+          position: "fixed",
+          left: "50%",
+          top: "50%",
+          transform: "translate(-50%, -50%)",
+          zIndex: 1001,
+          background: "#111827",
+          width: 780,
+          maxWidth: "96vw",
+          height: 560,
+          maxHeight: "90vh",
+          borderRadius: 16,
+          padding: 24,
+          color: "#fff",
+          display: "flex",
+          flexDirection: "column",
+          boxShadow: "0 24px 80px rgba(0,0,0,0.5)",
+          boxSizing: "border-box",
+        }}
+      >
+        {/* 헤더 */}
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: 12,
+            gap: 8,
+          }}
+        >
+          <div>
+            <div style={{ fontWeight: 600, fontSize: 15 }}>
+              지침 / 가이드 관리
+            </div>
+            <div
+              style={{
+                fontSize: 11,
+                color: "#9ca3af",
+                marginTop: 2,
+              }}
+            >
+              프로젝트 공통 지침과 대화방별 지침을 구분해서 관리합니다.
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            style={{
+              background: "#1f2937",
+              color: "#fff",
+              border: 0,
+              borderRadius: "50%",
+              width: 28,
+              height: 28,
+              fontWeight: 700,
+              fontSize: 16,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              cursor: "pointer",
+              boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
+              lineHeight: 1,
+              padding: 0,
+            }}
+            aria-label="닫기"
+          >
+            ×
+          </button>
+        </div>
+
+        {/* 탭 */}
+        <div
+          style={{
+            display: "flex",
+            gap: 8,
+            marginBottom: 12,
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => setTab("global")}
+            style={{
+              flex: 1,
+              border: 0,
+              borderRadius: 999,
+              padding: "6px 10px",
+              background: tab === "global" ? "#7c3aed" : "#1f2937",
+              color: tab === "global" ? "#fff" : "#9ca3af",
+              fontSize: 12,
+              cursor: "pointer",
+            }}
+          >
+            프로젝트 공통 지침
+          </button>
+          <button
+            type="button"
+            onClick={() => setTab("conversation")}
+            disabled={!activeConversationId}
+            style={{
+              flex: 1,
+              border: 0,
+              borderRadius: 999,
+              padding: "6px 10px",
+              background:
+                tab === "conversation" ? "#7c3aed" : "#1f2937",
+              color: tab === "conversation" ? "#fff" : "#9ca3af",
+              fontSize: 12,
+              cursor: activeConversationId ? "pointer" : "not-allowed",
+              opacity: activeConversationId ? 1 : 0.5,
+            }}
+          >
+            테마방 지침
+          </button>
+        </div>
+
+        {/* 본문: 좌측 리스트 / 우측 편집 */}
+        <div
+          style={{
+            display: "flex",
+            flex: 1,
+            gap: 16,
+            minHeight: 260,
+            minWidth: 0,
+          }}
+        >
+          {/* 좌측 리스트 */}
+          <div
+            style={{
+              flex: "0 0 260px",
+              maxWidth: 300,
+              minWidth: 220,
+              display: "flex",
+              flexDirection: "column",
+            }}
+          >
+            <button
+              type="button"
+              onClick={handleClickNewGuide}
+              style={{
+                alignSelf: "flex-start",
+                marginBottom: 8,
+                border: 0,
+                borderRadius: 8,
+                padding: "4px 10px",
+                background: "#7c3aed",
+                color: "#fff",
+                fontSize: 12,
+                cursor: "pointer",
+              }}
+            >
+              + 새 지침 추가
+            </button>
+
+            <div
+              style={{
+                flex: 1,
+                borderRadius: 8,
+                border: "1px solid #1f2937",
+                padding: 4,
+                overflow: "hidden",
+              }}
+            >
+              {renderGuideList()}
+            </div>
+          </div>
+
+          {/* 우측 편집 */}
+          <div
+            style={{
+              flex: "1 1 auto",
+              minWidth: 0,
+              display: "flex",
+              flexDirection: "column",
+            }}
+          >
+            {editing ? (
+              <>
+                <input
+                  value={editing.title}
+                  onChange={(e) => handleChangeTitle(e.target.value)}
+                  placeholder="지침 제목"
+                  style={{
+                    width: "100%",
+                    marginBottom: 8,
+                    borderRadius: 6,
+                    border: "1px solid #374151",
+                    padding: 8,
+                    fontSize: 13,
+                    background: "#111827",
+                    color: "#f9fafb",
+                  }}
+                />
+
+                {/* 첨부 / Ctrl+V 박스 (얇고, 반응형) */}
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "flex-start",
+                    marginBottom: 8,
+                  }}
+                >
+                  <div
+                    ref={pasteBoxRef}
+                    tabIndex={0}
+                    onPaste={handlePasteFile}
+                    onDrop={handleDropFile}
+                    onDragOver={(e) => e.preventDefault()}
+                    style={{
+                      border: "2px dashed #7c3aed",
+                      borderRadius: 8,
+                      padding: "6px 10px",
+                      fontSize: 12,
+                      color: "#d1d5db",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      height: 34,
+                      width: "48%",
+                      minWidth: 160,
+                      cursor: "pointer",
+                      background: "rgba(124,58,237,0.05)",
+                      userSelect: "none",
+                    }}
+                    onClick={() => {
+                      // 포커스를 먼저 주고(→ Ctrl+V 대상), 필요시 파일 선택도 열 수 있음
+                      pasteBoxRef.current?.focus();
+                      // fileInputRef.current?.click(); // 필요하면 클릭 시 파일 선택 열기
+                    }}
+                    title="이 영역에 포커스를 두고 Ctrl+V로 파일을 붙여넣거나, 파일을 드래그하여 첨부할 수 있습니다."
+                  >
+                    첨부 / Ctrl+V
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      multiple
+                      style={{ display: "none" }}
+                      onChange={handleFileInputChange}
+                      accept="image/*,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,.txt,.zip,.hwp,.ppt,.pptx,.csv"
+                    />
+                  </div>
+                </div>
+
+                {renderAttachedFiles()}
+
+                <textarea
+                  value={editing.content}
+                  onChange={(e) => handleChangeContent(e.target.value)}
+                  placeholder="지침 내용 또는 ISO/법률 작성 가이드라인을 입력하세요."
+                  style={{
+                    flex: 1,
+                    width: "100%",
+                    borderRadius: 6,
+                    border: "1px solid #374151",
+                    padding: 8,
+                    fontSize: 13,
+                    background: "#111827",
+                    color: "#f9fafb",
+                    resize: "none",
+                  }}
+                />
+                <div
+                  style={{
+                    marginTop: 8,
+                    fontSize: 11,
+                    color: "#9ca3af",
+                  }}
+                >
+                  ※ PDF/워드/이미지 등은 첨부만 해 두고, 지침 본문에는 요약·핵심
+                  규칙을 텍스트로 정리하는 것을 권장합니다.
+                </div>
+              </>
+            ) : (
+              <div
+                style={{
+                  flex: 1,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 12,
+                  color: "#9ca3af",
+                  textAlign: "center",
+                }}
+              >
+                좌측에서 지침을 선택하거나 &quot;새 지침 추가&quot; 버튼을 눌러
+                편집을 시작하세요.
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </>
+  );
+};
+
+export default GuidePanel;
