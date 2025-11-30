@@ -3,9 +3,6 @@ import "./App.css";
 
 import { fetchModels, requestIsoChat } from "./api/isoChatApi";
 
-/* ------------------------------
- * 1) 타입: isoChat → PrjApp로 통합
- * ------------------------------ */
 import {
   ModelOption,
   RunMode,
@@ -14,11 +11,8 @@ import {
   Conversation,
   Guide,
   AttachedFile,
-} from "./types/PrjApp";
+} from "./types/isoChat";
 
-/* ------------------------------
- * 2) 분리된 컴포넌트
- * ------------------------------ */
 import Sidebar from "./components/Sidebar";
 import ChatPanel from "./components/ChatPanel";
 import Rightbar from "./components/Rightbar";
@@ -29,7 +23,9 @@ const App: React.FC = () => {
    * 1. 모델 / 실행 모드 상태
    * -------------------------------- */
   const [model, setModel] = useState<ModelOption>("gpt-5.1");
-  const [modelList, setModelList] = useState<{ id: string; label: string }[]>([]);
+  const [modelList, setModelList] = useState<{ id: string; label: string }[]>(
+    []
+  );
   const [runMode, setRunMode] = useState<RunMode>("responses");
   const [answerMode, setAnswerMode] = useState<AnswerMode>("strict");
 
@@ -60,10 +56,12 @@ const App: React.FC = () => {
 
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
 
+  // conversations 변경 시 로컬스토리지 동기화
   useEffect(() => {
     localStorage.setItem("conversations", JSON.stringify(conversations));
   }, [conversations]);
 
+  // 초기 활성 테마 자동 지정
   useEffect(() => {
     if (!activeConversationId && conversations.length > 0) {
       setActiveConversationId(conversations[0].id);
@@ -125,7 +123,9 @@ const App: React.FC = () => {
    * 4. 지침 / 가이드 상태
    * -------------------------------- */
   const [globalGuides, setGlobalGuides] = useState<Guide[]>([]);
-  const [conversationGuides, setConversationGuides] = useState<Record<string, Guide[]>>({});
+  const [conversationGuides, setConversationGuides] = useState<
+    Record<string, Guide[]>
+  >({});
   const [isGuidePanelOpen, setIsGuidePanelOpen] = useState(false);
 
   const activeConvGuides: Guide[] = activeConversationId
@@ -137,7 +137,8 @@ const App: React.FC = () => {
     const base: Guide = {
       id,
       scope,
-      conversationId: scope === "conversation" ? activeConversationId || undefined : undefined,
+      conversationId:
+        scope === "conversation" ? activeConversationId || undefined : undefined,
       title: "",
       content: "",
       files: [],
@@ -157,21 +158,30 @@ const App: React.FC = () => {
 
   const handleUpdateGuide = (guide: Guide) => {
     if (guide.scope === "global") {
-      setGlobalGuides((prev) =>
-        prev.map((g: Guide) => (g.id === guide.id ? guide : g))
-      );
+      setGlobalGuides((prev) => {
+        const idx = prev.findIndex((g) => g.id === guide.id);
+        if (idx === -1) return [guide, ...prev];
+        return prev.map((g) => (g.id === guide.id ? guide : g));
+      });
       return;
     }
 
     if (guide.scope === "conversation") {
       const convId = guide.conversationId;
-      if (!convId) return;
+      if (!convId) return; // 안전장치
 
       setConversationGuides((prev) => {
         const list: Guide[] = prev[convId] || [];
+        const idx = list.findIndex((g) => g.id === guide.id);
+        if (idx === -1) {
+          return {
+            ...prev,
+            [convId]: [guide, ...list],
+          };
+        }
         return {
           ...prev,
-          [convId]: list.map((g: Guide) => (g.id === guide.id ? guide : g)),
+          [convId]: list.map((g) => (g.id === guide.id ? guide : g)),
         };
       });
     }
@@ -179,13 +189,13 @@ const App: React.FC = () => {
 
   const handleDeleteGuide = (id: string, scope: "global" | "conversation") => {
     if (scope === "global") {
-      setGlobalGuides((prev) => prev.filter((g) => g.id !== id));
+      setGlobalGuides((prev) => prev.filter((g: Guide) => g.id !== id));
       return;
     }
 
     if (scope === "conversation") {
       const convId = activeConversationId;
-      if (!convId) return;
+      if (!convId) return; // 안전장치
 
       setConversationGuides((prev) => {
         const list: Guide[] = prev[convId] || [];
@@ -258,6 +268,7 @@ const App: React.FC = () => {
     const userMsg: Message = { role: "user", content: trimmed };
     const newMessages = [...currentConv.messages, userMsg];
 
+    // 1) UI 먼저 업데이트
     setConversations((prev) =>
       prev.map((c: Conversation) =>
         c.id === activeConversationId ? { ...c, messages: newMessages } : c
@@ -316,10 +327,11 @@ const App: React.FC = () => {
   };
 
   /* --------------------------------
-   * 7. 렌더 조립
+   * 7. 렌더링: 조립만 담당
    * -------------------------------- */
   return (
     <div className="iso-app-root">
+      {/* 좌측: 테마/대화 리스트 (Sidebar 컴포넌트) */}
       <Sidebar
         conversations={conversations}
         activeConversationId={activeConversationId || ""}
@@ -331,9 +343,19 @@ const App: React.FC = () => {
         onEditTitleStart={handleEditTitleStart}
         onEditTitleSave={handleEditTitleSave}
         setEditingTitle={setEditingTitle}
-        onReorderConversations={undefined}
+        onOpenGuidePanel={() => setIsGuidePanelOpen(true)}
+        setEditingConvId={setEditingConvId}
+        onReorderConversations={(from, to) => {
+          setConversations((prev) => {
+            const arr = [...prev];
+            const [removed] = arr.splice(from, 1);
+            arr.splice(to, 0, removed);
+            return arr;
+          });
+        }}
       />
 
+      {/* 중앙: 채팅 패널 */}
       <ChatPanel
         activeConversation={activeConversation}
         attachedFiles={attachedFiles}
@@ -348,6 +370,7 @@ const App: React.FC = () => {
         onFileInputChange={handleFileInputChange}
       />
 
+      {/* 우측: 설정/상태 패널 */}
       <Rightbar
         model={model}
         setModel={(v) => setModel(v as ModelOption)}
@@ -358,9 +381,9 @@ const App: React.FC = () => {
         setAnswerMode={(v) => setAnswerMode(v as AnswerMode)}
         attachedFiles={attachedFiles}
         onRemoveFile={handleRemoveAttachedFile}
-        onOpenGuidePanel={() => setIsGuidePanelOpen(true)}
       />
 
+      {/* 플로팅 지침/가이드 패널 (GuidePanel.tsx는 기존 버전 유지) */}
       <GuidePanel
         isOpen={isGuidePanelOpen}
         onClose={() => setIsGuidePanelOpen(false)}

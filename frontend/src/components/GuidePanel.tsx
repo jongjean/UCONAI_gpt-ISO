@@ -1,5 +1,6 @@
 // src/components/GuidePanel.tsx
 import React, { useEffect, useRef, useState } from "react";
+import { DragDropContext, Droppable, Draggable, DropResult } from "react-beautiful-dnd";
 import { Guide, GuideFile } from "../types/isoChat";
 import "./GuidePanel.scrollbar.css";
 
@@ -19,6 +20,13 @@ type Tab = "global" | "conversation";
 
 // 파일 중복 방지를 위한 시그니처
 const fileSignature = (f: File) => `${f.name}-${f.size}-${f.lastModified}`;
+
+const reorder = <T,>(list: T[], startIndex: number, endIndex: number): T[] => {
+  const result = Array.from(list);
+  const [removed] = result.splice(startIndex, 1);
+  result.splice(endIndex, 0, removed);
+  return result;
+};
 
 const GuidePanel: React.FC<GuidePanelProps> = ({
   isOpen,
@@ -50,8 +58,83 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const currentList: Guide[] =
-    tab === "global" ? globalGuides : conversationGuides;
+  const [orderedGuides, setOrderedGuides] = useState<Guide[]>([]);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+    // 체크박스 선택 토글
+    const toggleSelect = (id: string) => {
+      setSelectedIds((prev) =>
+        prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+      );
+    };
+
+    // 선택 해제
+    const clearSelection = () => setSelectedIds([]);
+
+    // 합치기(머지) 기능
+    const handleMergeGuides = () => {
+      if (selectedIds.length < 2) return;
+      const guidesToMerge = orderedGuides.filter((g) => selectedIds.includes(g.id));
+      if (guidesToMerge.length < 2) return;
+      // 제목: 첫번째 + 외 제목은 []로
+      const mergedTitle = guidesToMerge.map((g, i) => i === 0 ? g.title : `[${g.title || '제목없음'}]`).join(" ");
+      // 내용: 모두 합침(\n\n)
+      const mergedContent = guidesToMerge.map((g) => g.content).filter(Boolean).join("\n\n");
+      // 파일: 중복 없이 합침
+      const fileMap = new Map<string, GuideFile>();
+      guidesToMerge.forEach(g => (g.files||[]).forEach(f => fileMap.set(f.id, f)));
+      const mergedFiles = Array.from(fileMap.values());
+      const now = new Date().toISOString();
+      const mergedGuide: Guide = {
+        id: `merged-${Date.now()}`,
+        title: mergedTitle,
+        content: mergedContent,
+        files: mergedFiles,
+        createdAt: now,
+        updatedAt: now,
+        scope: tab,
+      };
+      // 새 지침 추가 (신규 id이므로 update가 아니라 추가)
+      if (tab === "global") {
+        // global: globalGuides prop이므로 직접 추가 콜백 필요
+        if (typeof (window as any).addGlobalGuide === "function") {
+          (window as any).addGlobalGuide(mergedGuide);
+        } else {
+          // fallback: update로도 시도
+          onUpdateGuide(mergedGuide);
+        }
+      } else if (tab === "conversation") {
+        if (typeof (window as any).addConversationGuide === "function") {
+          (window as any).addConversationGuide(mergedGuide);
+        } else {
+          onUpdateGuide(mergedGuide);
+        }
+      } else {
+        onUpdateGuide(mergedGuide);
+      }
+      // 기존 지침 삭제 (합쳐진 것들만, 새로 추가된 mergedGuide는 삭제하지 않음)
+      setTimeout(() => {
+        guidesToMerge
+          .filter(g => g.id !== mergedGuide.id)
+          .forEach(g => onDeleteGuide(g.id, tab));
+      }, 200);
+      clearSelection();
+      setEditing(mergedGuide);
+    };
+  const currentList: Guide[] = tab === "global" ? globalGuides : conversationGuides;
+
+  // currentList가 바뀌면 orderedGuides도 동기화
+  useEffect(() => {
+    setOrderedGuides(currentList);
+  }, [currentList]);
+
+  // 드래그 앤 드롭 완료 시 순서 반영
+  const onDragEnd = (result: DropResult) => {
+    if (!result.destination) return;
+    if (result.source.index === result.destination.index) return;
+    const newOrder = reorder(orderedGuides, result.source.index, result.destination.index);
+    setOrderedGuides(newOrder);
+    // TODO: 외부로 순서 반영 필요시 콜백 호출 (예: onReorderGuides)
+  };
 
   /* ------------------------------------------------
    * 1. 기본 선택 로직 (새 지침 자동 선택 포함)
@@ -436,104 +519,155 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
               overflow: "hidden",
             }}
           >
-            <button
-              type="button"
-              onClick={() => onCreateGuide(tab)}
-              style={{
-                alignSelf: "flex-start",
-                marginBottom: 8,
-                borderRadius: 8,
-                border: 0,
-                padding: "6px 10px",
-                fontSize: 12,
-                background: "#7c3aed",
-                color: "#fff",
-                cursor: "pointer",
-              }}
-            >
-              + 새 지침 추가
-            </button>
-            <div
-              style={{
-                height: "100%",
-                minHeight: 0,
-                background: "#020617",
-                overflowY: "auto",
-                overflowX: "auto",
-                minWidth: 0,
-                maxWidth: "100%",
-                boxSizing: "border-box",
-                whiteSpace: "nowrap",
-              }}
-              className="guide-list-scrollbox"
-            >
-              {currentList.length === 0 ? (
-                <div
-                  style={{
-                    padding: 10,
-                    fontSize: 12,
-                    color: "#9ca3af",
-                  }}
-                >
-                  아직 등록된 지침이 없습니다.
-                </div>
-              ) : (
-                currentList.map((g) => (
-                  <div
-                    key={g.id}
-                    className={`guide-list-item${editing && editing.id === g.id ? " selected" : ""}`}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      padding: "0 8px",
-                      borderBottom: "1px solid #1e293b",
-                      cursor: "pointer",
-                      background: editing && editing.id === g.id ? "#312e81" : "transparent",
-                      color: editing && editing.id === g.id ? "#f9fafb" : "#d1d5db",
-                      fontWeight: editing && editing.id === g.id ? 600 : 400,
-                      fontSize: 13,
-                      height: 24,
-                      minHeight: 0,
-                      transition: "background 0.15s",
-                    }}
-                    onClick={() => setEditing(g)}
-                  >
-                    <span
-                      style={{
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                        flex: 1,
-                      }}
-                    >
-                      {g.title || "(제목 없음)"}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onDeleteGuide(g.id, tab);
-                      }}
-                      style={{
-                        marginLeft: 4,
-                        border: 0,
-                        background: "transparent",
-                        color: "#f97373",
-                        cursor: "pointer",
-                        fontSize: 14,
-                        fontWeight: 700,
-                        height: 24,
-                        lineHeight: "24px",
-                        padding: 0,
-                      }}
-                    >
-                      ×
-                    </button>
-                  </div>
-                ))
-              )}
+            <div style={{ display: "flex", justifyContent: "center", alignItems: "center", marginBottom: 8, gap: 24 }}>
+              <button
+                type="button"
+                onClick={() => onCreateGuide(tab)}
+                style={{
+                  borderRadius: 8,
+                  border: 0,
+                  padding: "8px 18px",
+                  fontSize: 13,
+                  background: "#7c3aed",
+                  color: "#fff",
+                  cursor: "pointer",
+                  fontWeight: 600,
+                  minWidth: 110,
+                  letterSpacing: 0.5,
+                }}
+              >
+                새지침추가
+              </button>
+              <button
+                type="button"
+                onClick={handleMergeGuides}
+                disabled={selectedIds.length < 2}
+                style={{
+                  borderRadius: 8,
+                  border: 0,
+                  padding: "8px 18px",
+                  fontSize: 13,
+                  background: selectedIds.length >= 2 ? "#7c3aed" : "#4b5563",
+                  color: "#fff",
+                  cursor: selectedIds.length >= 2 ? "pointer" : "not-allowed",
+                  opacity: selectedIds.length >= 2 ? 1 : 0.6,
+                  fontWeight: 600,
+                  minWidth: 110,
+                  letterSpacing: 0.5,
+                }}
+              >
+                지침 합치기
+              </button>
             </div>
+            <DragDropContext onDragEnd={onDragEnd}>
+              <Droppable droppableId="guide-list-droppable">
+                {(provided: import("react-beautiful-dnd").DroppableProvided) => (
+                  <div
+                    style={{
+                      height: "100%",
+                      minHeight: 0,
+                      background: "#020617",
+                      overflowY: "auto",
+                      overflowX: "auto",
+                      minWidth: 0,
+                      maxWidth: "100%",
+                      boxSizing: "border-box",
+                      whiteSpace: "nowrap",
+                    }}
+                    className="guide-list-scrollbox"
+                    ref={provided.innerRef}
+                    {...provided.droppableProps}
+                  >
+                    {orderedGuides.length === 0 ? (
+                      <div
+                        style={{
+                          padding: 10,
+                          fontSize: 12,
+                          color: "#9ca3af",
+                        }}
+                      >
+                        아직 등록된 지침이 없습니다.
+                      </div>
+                    ) : (
+                      <>
+                        {orderedGuides.map((g, idx) => (
+                          <Draggable key={g.id} draggableId={g.id} index={idx}>
+                            {(provided: import("react-beautiful-dnd").DraggableProvided, snapshot: import("react-beautiful-dnd").DraggableStateSnapshot) => (
+                              <div
+                                ref={provided.innerRef}
+                                {...provided.draggableProps}
+                                {...provided.dragHandleProps}
+                                className={`guide-list-item${editing && editing.id === g.id ? " selected" : ""}`}
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "space-between",
+                                  padding: "0 8px",
+                                  borderBottom: "1px solid #1e293b",
+                                  cursor: snapshot.isDragging ? "grabbing" : "pointer",
+                                  background: editing && editing.id === g.id ? "#312e81" : snapshot.isDragging ? "#3730a3" : "transparent",
+                                  color: editing && editing.id === g.id ? "#f9fafb" : "#d1d5db",
+                                  fontWeight: editing && editing.id === g.id ? 600 : 400,
+                                  fontSize: 13,
+                                  height: 24,
+                                  minHeight: 0,
+                                  transition: "background 0.15s",
+                                  ...provided.draggableProps.style,
+                                }}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={selectedIds.includes(g.id)}
+                                  onChange={() => toggleSelect(g.id)}
+                                  style={{ marginRight: 6 }}
+                                  onClick={e => e.stopPropagation()}
+                                />
+                                <span
+                                  style={{
+                                    overflow: "hidden",
+                                    textOverflow: "ellipsis",
+                                    whiteSpace: "nowrap",
+                                    flex: 1,
+                                  }}
+                                  onClick={() => setEditing(g)}
+                                >
+                                  {g.title || "(제목 없음)"}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onDeleteGuide(g.id, tab);
+                                  }}
+                                  style={{
+                                    marginLeft: 4,
+                                    border: 0,
+                                    background: "transparent",
+                                    color: "#f97373",
+                                    cursor: "pointer",
+                                    fontSize: 14,
+                                    fontWeight: 700,
+                                    height: 24,
+                                    lineHeight: "24px",
+                                    padding: 0,
+                                  }}
+                                >
+                                  ×
+                                </button>
+                              </div>
+                            )}
+                          </Draggable>
+                        ))}
+                      </>
+                    )}
+                    {provided.placeholder}
+                    <div style={{ fontSize: 11, color: "#9ca3af", margin: "8px 0 0 0", textAlign: "left" }}>
+                      순서변경이 가능합니다.
+                    </div>
+                  </div>
+                )}
+              </Droppable>
+            </DragDropContext>
           </div>
 
           {/* 우측: 편집 영역 */}
@@ -547,7 +681,7 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
               flexDirection: "column",
               overflow: "hidden",
             }}
-          >
+            >
             {editing ? (
               <div
                 style={{

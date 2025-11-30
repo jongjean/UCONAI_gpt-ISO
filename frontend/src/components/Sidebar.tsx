@@ -1,11 +1,11 @@
-// src/components/Sidebar.tsx
+console.log("BUILD_VERSION: 2025-11-25-17:55");
 
 import React, { useState } from "react";
-import { Conversation } from "../types/isoApp";
+import { Conversation } from "../types/isoChat";
 
 interface SidebarProps {
   conversations: Conversation[];
-  activeConversationId: string | null;
+  activeConversationId: string;
   onNewConversation: () => void;
   onSelectConversation: (id: string) => void;
   onDeleteConversation: (id: string) => void;
@@ -14,8 +14,9 @@ interface SidebarProps {
   onEditTitleStart: (conv: Conversation) => void;
   onEditTitleSave: (id: string) => void;
   setEditingTitle: (title: string) => void;
+  setEditingConvId: (id: string | null) => void;
+  onOpenGuidePanel: () => void;
   onReorderConversations?: (from: number, to: number) => void;
-  onOpenGuidePanel?: () => void; // 좌측에서 지침 패널 열고 싶을 때 사용
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
@@ -29,24 +30,34 @@ const Sidebar: React.FC<SidebarProps> = ({
   onEditTitleStart,
   onEditTitleSave,
   setEditingTitle,
-  onReorderConversations,
+  setEditingConvId,
   onOpenGuidePanel,
+  onReorderConversations,
 }) => {
-  // 드래그 정렬 상태
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
 
-  const handleDragStart = (idx: number) => setDragIndex(idx);
-
-  const handleDragOver = (idx: number, e: React.DragEvent) => {
-    e.preventDefault();
-    setHoverIndex(idx);
+  const handleDragStart = (index: number) => {
+    setDragIndex(index);
   };
 
-  const handleDrop = (idx: number) => {
-    if (dragIndex !== null && dragIndex !== idx && onReorderConversations) {
-      onReorderConversations(dragIndex, idx);
+  const handleDragOver = (e: React.DragEvent<HTMLLIElement>, index: number) => {
+    e.preventDefault();
+    setHoverIndex(index);
+  };
+
+  const handleDrop = (index: number) => {
+    if (
+      dragIndex === null ||
+      dragIndex === index ||
+      !onReorderConversations ||
+      conversations.length < 2
+    ) {
+      setDragIndex(null);
+      setHoverIndex(null);
+      return;
     }
+    onReorderConversations(dragIndex, index);
     setDragIndex(null);
     setHoverIndex(null);
   };
@@ -75,136 +86,127 @@ const Sidebar: React.FC<SidebarProps> = ({
       <div className="iso-sidebar-section theme-list">
         <div className="iso-sidebar-section-title">테마 목록</div>
         <ul className="iso-sidebar-conv-list">
-          {conversations.map((c, idx) => {
-            const isActive = c.id === activeConversationId;
-            const isDragging = dragIndex === idx;
-            const isHover = hoverIndex === idx && dragIndex !== null;
-
-            return (
-              <li
-                key={c.id}
-                className={
-                  isActive
-                    ? "iso-sidebar-conv-item active"
-                    : "iso-sidebar-conv-item"
-                }
-                onClick={() => onSelectConversation(c.id)}
-                draggable={!!onReorderConversations}
-                onDragStart={() => handleDragStart(idx)}
-                onDragOver={(e) => handleDragOver(idx, e)}
-                onDrop={() => handleDrop(idx)}
-                onDragEnd={handleDragEnd}
-                style={{
-                  opacity: isDragging ? 0.7 : 1,
-                  backgroundColor: isHover ? "#111827" : undefined,
-                  transition: "background 0.15s, opacity 0.15s",
-                }}
-              >
-                <div style={{ position: "relative", minHeight: 16 }}>
-                  {conversations.length > 1 && (
-                    <button
-                      type="button"
-                      title="테마 삭제"
-                      className="iso-sidebar-conv-xbtn"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (
-                          window.confirm("정말 이 테마를 삭제하시겠습니까?")
-                        ) {
-                          onDeleteConversation(c.id);
-                        }
-                      }}
-                      tabIndex={-1}
-                    >
-                      <span
-                        style={{
-                          fontSize: 10,
-                          lineHeight: 1,
-                          pointerEvents: "none",
-                        }}
-                      >
-                        ×
-                      </span>
-                    </button>
-                  )}
-
-                  <div
-                    className="iso-sidebar-conv-title"
+          {conversations.map((c, idx) => (
+            <li
+              key={c.id}
+              className={
+                c.id === activeConversationId
+                  ? "iso-sidebar-conv-item active"
+                  : "iso-sidebar-conv-item"
+              }
+              draggable={conversations.length > 1}
+              onClick={() => onSelectConversation(c.id)}
+              onDragStart={() => handleDragStart(idx)}
+              onDragOver={(e) => handleDragOver(e, idx)}
+              onDrop={() => handleDrop(idx)}
+              onDragEnd={handleDragEnd}
+              style={{
+                opacity: dragIndex === idx ? 0.7 : 1,
+                background:
+                  hoverIndex === idx && dragIndex !== null
+                    ? "rgba(79, 70, 229, 0.15)"
+                    : undefined,
+              }}
+            >
+              <div style={{ position: "relative", minHeight: 16 }}>
+                {conversations.length > 1 && (
+                  <button
+                    type="button"
+                    title="테마 삭제"
+                    className="iso-sidebar-conv-xbtn"
                     onClick={(e) => {
                       e.stopPropagation();
-                      onEditTitleStart(c);
+                      if (window.confirm("정말 이 테마를 삭제하시겠습니까?")) {
+                        onDeleteConversation(c.id);
+                      }
                     }}
+                    tabIndex={-1}
                   >
-                    {editingConvId === c.id ? (
-                      <input
-                        type="text"
-                        value={editingTitle}
-                        autoFocus
-                        onChange={(e) => setEditingTitle(e.target.value)}
-                        onBlur={() => onEditTitleSave(c.id)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") onEditTitleSave(c.id);
-                          if (e.key === "Escape") {
-                            // 취소: 단순히 편집 상태만 해제
-                            onEditTitleSave(c.id);
-                          }
-                        }}
-                      />
-                    ) : (
-                      <span>{c.title}</span>
-                    )}
-                  </div>
-
-                  <div className="iso-sidebar-conv-meta">
-                    {(() => {
-                      const dateMatch = c.createdAt.match(
-                        /^(\d{4}\. ?\d{1,2}\. ?\d{1,2}\.)/
-                      );
-                      const timeMatch = c.createdAt.match(
-                        /(오전|오후)\s*\d{1,2}:\d{2}/
-                      );
-                      const date = dateMatch ? dateMatch[1].trim() : "";
-                      const time = timeMatch ? timeMatch[0] : "";
-                      return (
-                        <>
-                          {date}
-                          {time ? ` ${time}` : ""}
-                          {` · ${c.messages.length} 메시지`}
-                        </>
-                      );
-                    })()}
-                  </div>
+                    <span
+                      style={{
+                        fontSize: 10,
+                        lineHeight: 1,
+                        pointerEvents: "none",
+                      }}
+                    >
+                      ×
+                    </span>
+                  </button>
+                )}
+                <div
+                  className="iso-sidebar-conv-title"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onEditTitleStart(c);
+                  }}
+                >
+                  {editingConvId === c.id ? (
+                    <input
+                      type="text"
+                      value={editingTitle}
+                      autoFocus
+                      onChange={(e) => setEditingTitle(e.target.value)}
+                      onBlur={() => onEditTitleSave(c.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") onEditTitleSave(c.id);
+                        if (e.key === "Escape") {
+                          setEditingConvId(null);
+                          setEditingTitle("");
+                        }
+                      }}
+                    />
+                  ) : (
+                    <span>{c.title}</span>
+                  )}
                 </div>
-              </li>
-            );
-          })}
+                <div className="iso-sidebar-conv-meta">
+                  {(() => {
+                    const dateMatch = c.createdAt.match(
+                      /^(\d{4}\. ?\d{1,2}\. ?\d{1,2}\.)/
+                    );
+                    const timeMatch = c.createdAt.match(
+                      /(오전|오후)\s*\d{1,2}:\d{2}/
+                    );
+                    const date = dateMatch ? dateMatch[1].trim() : "";
+                    const time = timeMatch ? timeMatch[0] : "";
+                    return (
+                      date +
+                      (time ? " " + time : "") +
+                      " · " +
+                      c.messages.length +
+                      " 메시지"
+                    );
+                  })()}
+                </div>
+              </div>
+            </li>
+          ))}
         </ul>
       </div>
 
+      {/* 좌측 하단: 지침 / 가이드 섹션 */}
       <div className="iso-sidebar-section guides">
         <div className="iso-sidebar-section-title">지침 / 가이드</div>
         <div className="iso-sidebar-guides-desc">
-          프로젝트 공통 지침과 대화방 지침을 통합 관리합니다.
+          공통지침과 테마지침 통합관리
         </div>
-        {onOpenGuidePanel && (
-          <button
-            type="button"
-            onClick={onOpenGuidePanel}
-            style={{
-              marginTop: 8,
-              width: "100%",
-              borderRadius: 999,
-              border: "1px solid #4b5563",
-              background: "transparent",
-              color: "#e5e7eb",
-              fontSize: 12,
-              padding: "6px 10px",
-              cursor: "pointer",
-            }}
-          >
-            지침 / 가이드 패널 열기
-          </button>
-        )}
+        <button
+          type="button"
+          onClick={onOpenGuidePanel}
+          style={{
+            marginTop: 8,
+            width: "100%",
+            borderRadius: 999,
+            border: "1px solid #4b5563",
+            background: "transparent",
+            color: "#e5e7eb",
+            fontSize: 12,
+            padding: "6px 10px",
+            cursor: "pointer",
+          }}
+        >
+          지침 / 가이드 관리
+        </button>
       </div>
     </aside>
   );

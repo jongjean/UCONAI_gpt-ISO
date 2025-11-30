@@ -1,6 +1,9 @@
 import React from "react";
-import { Conversation, AttachedFile } from "../types/PrjApp";
-import ClipIcon from "./common/ClipIcon";
+import {
+  Conversation,
+  AttachedFile,
+  Message,
+} from "../types/isoChat";
 
 type ChatPanelProps = {
   activeConversation: Conversation | null;
@@ -15,6 +18,13 @@ type ChatPanelProps = {
   fileInputRef: React.RefObject<HTMLInputElement>;
   onFileInputChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
 };
+
+// App.tsx 안에 있던 클립 아이콘을 이쪽으로 이동
+const ClipIcon: React.FC = () => (
+  <span style={{ fontSize: 16, display: "inline-flex", alignItems: "center" }}>
+    📎
+  </span>
+);
 
 const ChatPanel: React.FC<ChatPanelProps> = ({
   activeConversation,
@@ -36,60 +46,60 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
           style={{
             fontSize: 13,
             color: "#9ca3af",
+            padding: "16px 0",
             textAlign: "center",
-            padding: "24px 0",
           }}
         >
-          좌측에서 테마를 선택하거나 &ldquo;새 테마&rdquo; 버튼을 눌러
-          ISO/IEC 작업을 시작해 주세요.
+          아직 대화가 없습니다.
         </div>
       );
     }
 
-    return activeConversation.messages.map((msg, idx) => (
-      <div
-        key={idx}
-        className={
-          msg.role === "user"
-            ? "iso-chat-bubble iso-chat-bubble-user"
-            : "iso-chat-bubble iso-chat-bubble-assistant"
-        }
-      >
+    return activeConversation.messages.map(
+      (msg: Message, idx: number) => (
         <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            marginBottom: 2,
-          }}
+          key={idx}
+          className={
+            msg.role === "user"
+              ? "iso-chat-bubble iso-chat-bubble-user"
+              : "iso-chat-bubble iso-chat-bubble-assistant"
+          }
         >
-          <span
+          <div
             style={{
-              background: msg.role === "user" ? "#5b21b6" : "#111827",
-              color: "#fff",
-              borderRadius: 999,
-              padding: "2px 16px",
-              fontWeight: 600,
-              fontSize: 12,
-              marginRight: 8,
-              display: "inline-block",
-              minWidth: 36,
-              textAlign: "center",
+              display: "flex",
+              alignItems: "center",
+              marginBottom: 2,
             }}
           >
-            {msg.role === "user" ? "강박사님" : "UCONAI-ISO Expert"}
-          </span>
+            <span
+              style={{
+                background: "#5b21b6",
+                color: "#fff",
+                borderRadius: 999,
+                padding: "2px 16px",
+                fontWeight: 600,
+                fontSize: 12,
+                marginRight: 8,
+                display: "inline-block",
+                minWidth: 36,
+                textAlign: "center",
+              }}
+            >
+              {msg.role === "user" ? "강박사님" : "유코나이-ISO Expert"}
+            </span>
+          </div>
+          <div className="iso-chat-bubble-content">{msg.content}</div>
         </div>
-        <div className="iso-chat-bubble-content">{msg.content}</div>
-      </div>
-    ));
+      )
+    );
   };
 
   const renderAttachedFilesInline = () => {
-    if (!attachedFiles.length) return null;
-
+    if (attachedFiles.length === 0) return null;
     return (
       <div style={{ fontSize: 11, color: "#6b7280", marginTop: 4 }}>
-        {attachedFiles.map((file) => (
+        {attachedFiles.map((file: AttachedFile) => (
           <span key={file.id} className="iso-attached-file-pill">
             {file.name}
             <button
@@ -112,17 +122,9 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
     );
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      onSubmit();
-    }
-  };
-
   return (
     <main className="iso-main">
       <div className="iso-main-card">
-        {/* 상단 헤더 */}
         <div className="iso-main-card-header">
           <h1 className="iso-main-title">ISO/IEC개발 AI 서포터 - 유코나이</h1>
           <p className="iso-main-subtitle">
@@ -130,19 +132,15 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
           </p>
         </div>
 
-        {/* 설명 영역 */}
         <div className="iso-main-description">
-          우측 &quot;대화 설정 / 기능&quot; 패널에서 모델·실행 방식·답변 모드를 선택하고,
-          이 영역에서는 ISO/IEC 초안·TR/IS 문서를 중심으로 대화를 진행합니다.
+          우측 &quot;대화 설정 / 기능&quot; 패널에서 모델·실행 방식·답변 모드를
+          선택하고, 이 영역에서는 ISO/IEC 초안·TR/IS 문서를 중심으로 대화를 진행합니다.
         </div>
 
-        {/* 채팅 메시지 영역 */}
         <div className="iso-main-chat">{renderMessages()}</div>
 
-        {/* 첨부 파일 인라인 표시 */}
         {renderAttachedFilesInline()}
 
-        {/* 첨부 바 */}
         <div className="attach-bar">
           <button
             type="button"
@@ -175,17 +173,20 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
           />
         </div>
 
-        {/* 에러 메시지 */}
         {error && <div className="iso-error">{error}</div>}
 
-        {/* 입력 폼 */}
         <form className="iso-input-form" onSubmit={onSubmit}>
           <textarea
             className="iso-textarea"
             placeholder="질문을 입력하고 Enter로 전송 (Shift+Enter 줄바꿈)"
             value={input}
             onChange={(e) => onChangeInput(e.target.value)}
-            onKeyDown={handleKeyDown}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                onSubmit();
+              }
+            }}
             onDrop={onDrop}
             onDragOver={(e) => e.preventDefault()}
           />
