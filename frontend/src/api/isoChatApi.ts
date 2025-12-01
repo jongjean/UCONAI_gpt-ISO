@@ -11,6 +11,7 @@ export async function fetchModels() {
 }
 
 export type IsoChatPayload = {
+  message: string;
   model: string;
   runMode: "chat" | "responses";
   answerMode: "strict" | "aggressive";

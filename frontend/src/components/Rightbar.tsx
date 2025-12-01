@@ -108,7 +108,7 @@ const Rightbar: React.FC<RightbarProps> = ({
                 적극형
               </button>
               <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 4, textAlign: "center" }}>
-                GPT-AI 답번제공
+                생성형 AI 답변
               </div>
             </div>
           </div>

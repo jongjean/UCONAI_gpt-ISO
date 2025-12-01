@@ -135,7 +135,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                 )}
                 <div
                   className="iso-sidebar-conv-title"
-                  onClick={(e) => {
+                  onDoubleClick={(e) => {
                     e.stopPropagation();
                     onEditTitleStart(c);
                   }}

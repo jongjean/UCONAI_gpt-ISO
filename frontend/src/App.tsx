@@ -18,6 +18,14 @@ import ChatPanel from "./components/ChatPanel";
 import Rightbar from "./components/Rightbar";
 import GuidePanel from "./components/GuidePanel";
 
+// 모델 설명 매핑 (라벨 보강용)
+const MODEL_DESCRIPTIONS: Record<string, string> = {
+  "gpt-5.1": "복잡한 추론",
+  "gpt-4.1": "정확도·근거 중심",
+  "gpt-4.1-mini": "빠른 응답",
+  "gpt-4.1-adv": "장문 병합·요약",
+};
+
 const App: React.FC = () => {
   /* --------------------------------
    * 1. 모델 / 실행 모드 상태
@@ -31,12 +39,22 @@ const App: React.FC = () => {
 
   useEffect(() => {
     fetchModels()
-      .then((models) => setModelList(models))
+      .then((models) =>
+        setModelList(
+          models.map((m) => ({
+            ...m,
+            label: MODEL_DESCRIPTIONS[m.id]
+              ? `${m.id} (${MODEL_DESCRIPTIONS[m.id]})`
+              : m.label || m.id,
+          }))
+        )
+      )
       .catch(() => {
         setModelList([
-          { id: "gpt-5.1", label: "gpt-5.1" },
-          { id: "gpt-4.1", label: "gpt-4.1" },
-          { id: "gpt-4.1-mini", label: "gpt-4.1-mini" },
+          { id: "gpt-5.1", label: "gpt-5.1 (복잡한 추론)" },
+          { id: "gpt-4.1", label: "gpt-4.1 (정확도·근거 중심)" },
+          { id: "gpt-4.1-mini", label: "gpt-4.1-mini (빠른 응답)" },
+          { id: "gpt-4.1-adv", label: "gpt-4.1-adv (장문 병합·요약)" },
         ]);
       });
   }, []);
@@ -46,24 +64,60 @@ const App: React.FC = () => {
    * -------------------------------- */
   const [conversations, setConversations] = useState<Conversation[]>(() => {
     const saved = localStorage.getItem("conversations");
-    if (!saved) return [];
+    if (!saved) {
+      return [
+        {
+          id: "default",
+          title: "신규 테마",
+          createdAt: new Date().toLocaleString(),
+          messages: [],
+        },
+      ];
+    }
     try {
       return JSON.parse(saved) as Conversation[];
     } catch {
-      return [];
+      return [
+        {
+          id: "default",
+          title: "신규 테마",
+          createdAt: new Date().toLocaleString(),
+          messages: [],
+        },
+      ];
     }
   });
 
-  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(() => {
+    return localStorage.getItem("activeConversationId");
+  });
 
   // conversations 변경 시 로컬스토리지 동기화
   useEffect(() => {
     localStorage.setItem("conversations", JSON.stringify(conversations));
   }, [conversations]);
 
+  useEffect(() => {
+    if (activeConversationId) {
+      localStorage.setItem("activeConversationId", activeConversationId);
+    }
+  }, [activeConversationId]);
+
   // 초기 활성 테마 자동 지정
   useEffect(() => {
-    if (!activeConversationId && conversations.length > 0) {
+    if (conversations.length === 0) {
+      const conv: Conversation = {
+        id: "default",
+        title: "신규 테마",
+        createdAt: new Date().toLocaleString(),
+        messages: [],
+      };
+      setConversations([conv]);
+      setActiveConversationId(conv.id);
+      return;
+    }
+
+    if (!activeConversationId) {
       setActiveConversationId(conversations[0].id);
     }
   }, [conversations, activeConversationId]);
@@ -213,11 +267,8 @@ const App: React.FC = () => {
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleDrop = (e: React.DragEvent<HTMLTextAreaElement>) => {
-    e.preventDefault();
-    const files = Array.from(e.dataTransfer.files || []);
+  const addFiles = (files: File[]) => {
     if (!files.length) return;
-
     setAttachedFiles((prev) => [
       ...prev,
       ...files.map<AttachedFile>((file) => ({
@@ -228,18 +279,13 @@ const App: React.FC = () => {
     ]);
   };
 
-  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
-    if (!files.length) return;
+  const handleDrop = (e: React.DragEvent<HTMLTextAreaElement>) => {
+    e.preventDefault();
+    addFiles(Array.from(e.dataTransfer.files || []));
+  };
 
-    setAttachedFiles((prev) => [
-      ...prev,
-      ...files.map<AttachedFile>((file) => ({
-        id: `af-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-        name: file.name,
-        file,
-      })),
-    ]);
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    addFiles(Array.from(e.target.files || []));
 
     e.target.value = "";
   };
@@ -252,6 +298,7 @@ const App: React.FC = () => {
    * 6. 입력 / 전송 / 에러 상태
    * -------------------------------- */
   const [input, setInput] = useState("");
+  const [lastSentInput, setLastSentInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -266,6 +313,7 @@ const App: React.FC = () => {
     if (!currentConv) return;
 
     const userMsg: Message = { role: "user", content: trimmed };
+    setLastSentInput(trimmed);
     const newMessages = [...currentConv.messages, userMsg];
 
     // 1) UI 먼저 업데이트
@@ -280,6 +328,7 @@ const App: React.FC = () => {
 
     try {
       const payload = {
+        message: trimmed,
         model,
         runMode,
         answerMode,
@@ -360,11 +409,13 @@ const App: React.FC = () => {
         activeConversation={activeConversation}
         attachedFiles={attachedFiles}
         input={input}
+        lastSentInput={lastSentInput}
         loading={loading}
         error={error}
         onChangeInput={setInput}
         onSubmit={handleSubmit}
         onDrop={handleDrop}
+        onFilesAdded={addFiles}
         onRemoveAttachedFile={handleRemoveAttachedFile}
         fileInputRef={fileInputRef}
         onFileInputChange={handleFileInputChange}

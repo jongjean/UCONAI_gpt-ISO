@@ -9,11 +9,13 @@ type ChatPanelProps = {
   activeConversation: Conversation | null;
   attachedFiles: AttachedFile[];
   input: string;
+  lastSentInput: string;
   loading: boolean;
   error: string | null;
   onChangeInput: (value: string) => void;
   onSubmit: (e?: React.FormEvent) => void;
   onDrop: (e: React.DragEvent<HTMLTextAreaElement>) => void;
+  onFilesAdded: (files: File[]) => void;
   onRemoveAttachedFile: (id: string) => void;
   fileInputRef: React.RefObject<HTMLInputElement>;
   onFileInputChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
@@ -30,15 +32,33 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
   activeConversation,
   attachedFiles,
   input,
+  lastSentInput,
   loading,
   error,
   onChangeInput,
   onSubmit,
   onDrop,
+  onFilesAdded,
   onRemoveAttachedFile,
   fileInputRef,
   onFileInputChange,
 }) => {
+  const [inputHeight, setInputHeight] = React.useState<number>(120);
+  const resizingRef = React.useRef<{
+    startY: number;
+    startHeight: number;
+  } | null>(null);
+  const messagesRef = React.useRef<HTMLDivElement | null>(null);
+
+  // 새 메시지가 추가될 때마다 자동 스크롤
+  React.useEffect(() => {
+    const el = messagesRef.current;
+    if (!el) return;
+    requestAnimationFrame(() => {
+      el.scrollTop = el.scrollHeight;
+    });
+  }, [activeConversation?.id, activeConversation?.messages.length]);
+
   const renderMessages = () => {
     if (!activeConversation || activeConversation.messages.length === 0) {
       return (
@@ -59,37 +79,48 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
       (msg: Message, idx: number) => (
         <div
           key={idx}
-          className={
-            msg.role === "user"
-              ? "iso-chat-bubble iso-chat-bubble-user"
-              : "iso-chat-bubble iso-chat-bubble-assistant"
-          }
+          style={{
+            display: "flex",
+            justifyContent: msg.role === "user" ? "flex-end" : "flex-start",
+          }}
         >
           <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              marginBottom: 2,
-            }}
+            className={
+              msg.role === "user"
+                ? "iso-chat-bubble iso-chat-bubble-user"
+                : "iso-chat-bubble iso-chat-bubble-assistant"
+            }
+            style={{ textAlign: msg.role === "user" ? "right" : "left" }}
           >
-            <span
+            <div
               style={{
-                background: "#5b21b6",
-                color: "#fff",
-                borderRadius: 999,
-                padding: "2px 16px",
-                fontWeight: 600,
-                fontSize: 12,
-                marginRight: 8,
-                display: "inline-block",
-                minWidth: 36,
-                textAlign: "center",
+                display: "flex",
+                alignItems: "center",
+                marginBottom: 2,
+                justifyContent:
+                  msg.role === "user" ? "flex-end" : "flex-start",
               }}
             >
-              {msg.role === "user" ? "강박사님" : "유코나이-ISO Expert"}
-            </span>
+              <span
+                style={{
+                  background: "#5b21b6",
+                  color: "#fff",
+                  borderRadius: 999,
+                  padding: "2px 16px",
+                  fontWeight: 600,
+                  fontSize: 12,
+                  marginRight: msg.role === "assistant" ? 8 : 0,
+                  marginLeft: msg.role === "user" ? 8 : 0,
+                  display: "inline-block",
+                  minWidth: 36,
+                  textAlign: "center",
+                }}
+              >
+                {msg.role === "user" ? "강박사님" : "유코나이-ISO Expert"}
+              </span>
+            </div>
+            <div className="iso-chat-bubble-content">{msg.content}</div>
           </div>
-          <div className="iso-chat-bubble-content">{msg.content}</div>
         </div>
       )
     );
@@ -124,7 +155,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
 
   return (
     <main className="iso-main">
-      <div className="iso-main-card">
+          <div className="iso-main-card">
         <div className="iso-main-card-header">
           <h1 className="iso-main-title">ISO/IEC개발 AI 서포터 - 유코나이</h1>
           <p className="iso-main-subtitle">
@@ -137,7 +168,9 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
           선택하고, 이 영역에서는 ISO/IEC 초안·TR/IS 문서를 중심으로 대화를 진행합니다.
         </div>
 
-        <div className="iso-main-chat">{renderMessages()}</div>
+        <div className="iso-main-chat" ref={messagesRef}>
+          {renderMessages()}
+        </div>
 
         {renderAttachedFilesInline()}
 
@@ -173,23 +206,115 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
           />
         </div>
 
+        {/* 파일 드래그/붙여넣기 안내 영역 */}
+        <div
+          style={{
+            display: "flex",
+            gap: 10,
+            marginTop: 8,
+            flexWrap: "wrap",
+          }}
+        >
+          <div
+            onDrop={(e) => {
+              e.preventDefault();
+              onFilesAdded(Array.from(e.dataTransfer.files || []));
+            }}
+            onDragOver={(e) => e.preventDefault()}
+            style={{
+              flex: 1,
+              minWidth: 200,
+              border: "2px dashed #7c3aed",
+              borderRadius: 10,
+              padding: 10,
+              background: "rgba(124,58,237,0.05)",
+              color: "#4c1d95",
+              fontSize: 12,
+            }}
+          >
+            ⬇️ 파일 드래그&드롭 박스
+          </div>
+          <div
+            onPaste={(e) => {
+              const files = Array.from(e.clipboardData?.files || []);
+              if (files.length) {
+                e.preventDefault();
+                onFilesAdded(files);
+              }
+            }}
+            tabIndex={0}
+            style={{
+              flex: 1,
+              minWidth: 200,
+              border: "2px dashed #2563eb",
+              borderRadius: 10,
+              padding: 10,
+              background: "rgba(37,99,235,0.05)",
+              color: "#1d4ed8",
+              fontSize: 12,
+              outline: "none",
+            }}
+            title="클릭 후 Ctrl+V로 파일 붙여넣기"
+          >
+            📋 붙여넣기 박스 (클릭 후 Ctrl+V)
+          </div>
+        </div>
+
         {error && <div className="iso-error">{error}</div>}
 
         <form className="iso-input-form" onSubmit={onSubmit}>
-          <textarea
-            className="iso-textarea"
-            placeholder="질문을 입력하고 Enter로 전송 (Shift+Enter 줄바꿈)"
-            value={input}
-            onChange={(e) => onChangeInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                onSubmit();
-              }
-            }}
-            onDrop={onDrop}
-            onDragOver={(e) => e.preventDefault()}
-          />
+          <div className="iso-textarea-wrapper">
+            <textarea
+              className="iso-textarea"
+              style={{ height: inputHeight }}
+              placeholder="질문을 입력하고 Enter로 전송 (Shift+Enter 줄바꿈)"
+              value={input}
+              onChange={(e) => onChangeInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "ArrowUp" && !input.trim()) {
+                  if (lastSentInput) {
+                    e.preventDefault();
+                    onChangeInput(lastSentInput);
+                  }
+                }
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  onSubmit();
+                }
+              }}
+              onDrop={onDrop}
+              onDragOver={(e) => e.preventDefault()}
+            />
+            <span
+              className="iso-textarea-resize"
+              onMouseDown={(e) => {
+                resizingRef.current = {
+                  startY: e.clientY,
+                  startHeight: inputHeight,
+                };
+                const move = (ev: MouseEvent) => {
+                  if (!resizingRef.current) return;
+                  const delta = resizingRef.current.startY - ev.clientY;
+                  setInputHeight(
+                    Math.min(
+                      320,
+                      Math.max(100, resizingRef.current.startHeight + delta)
+                    )
+                  );
+                };
+                const up = () => {
+                  resizingRef.current = null;
+                  window.removeEventListener("mousemove", move);
+                  window.removeEventListener("mouseup", up);
+                };
+                window.addEventListener("mousemove", move);
+                window.addEventListener("mouseup", up);
+              }}
+              title="위아래로 드래그하여 크기 조절"
+            >
+              ↕
+            </span>
+          </div>
           <button
             type="submit"
             className="iso-submit-btn"
