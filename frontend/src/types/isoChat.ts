@@ -8,9 +8,22 @@ export type AnswerMode = "strict" | "aggressive";
 // 채팅 메시지
 export type MessageRole = "user" | "assistant";
 
+// 첨부 메타(서버 응답 기준)
+export interface MessageAttachment {
+  id: string;
+  fileName: string;
+  fileSize: number | null;
+  mimeType?: string | null;
+  storageKey: string;
+  downloadUrl?: string;
+}
+
 export interface Message {
+  id?: string;
   role: MessageRole;
   content: string;
+  createdAt?: string;
+  attachments?: MessageAttachment[];
 }
 
 // 테마(대화방)
@@ -24,11 +37,13 @@ export interface Conversation {
 // 지침에 첨부되는 파일 메타데이터
 export interface GuideFile {
   id: string;
-  name: string;
-  size: number;
-  type: string;
-  url: string;            // 나중에 MinIO/S3 URL 등으로 사용 예정
-  createdAt: string;
+  fileName: string;
+  fileSize: number | null;
+  mimeType?: string | null;
+  storageKey?: string;
+  downloadUrl?: string;
+  createdAt?: string;
+  file?: File; // 업로드 전 임시 보관용
 }
 
 // 지침/가이드

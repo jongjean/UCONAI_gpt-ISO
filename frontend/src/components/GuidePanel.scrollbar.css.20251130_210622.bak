@@ -1,0 +1,15 @@
+.guide-list-scrollbox::-webkit-scrollbar {
+  width: 8px;
+  background: #18181b;
+}
+.guide-list-scrollbox::-webkit-scrollbar-thumb {
+  background: #222226;
+  border-radius: 6px;
+}
+.guide-list-scrollbox::-webkit-scrollbar-thumb:hover {
+  background: #333336;
+}
+.guide-list-scrollbox {
+  scrollbar-width: thin;
+  scrollbar-color: #222226 #18181b;
+}

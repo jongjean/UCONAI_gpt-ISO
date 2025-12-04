@@ -197,7 +197,7 @@ const GuideEditor: React.FC<GuideEditorProps> = ({
                   textOverflow: "ellipsis",
                 }}
               >
-                {file.name}
+                {file.fileName || "(파일명 없음)"}
               </span>
               <button
                 type="button"

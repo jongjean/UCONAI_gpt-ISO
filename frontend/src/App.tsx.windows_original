@@ -1,0 +1,352 @@
+// src/App.tsx
+import React, { useEffect, useState, FormEvent } from "react";
+
+// === 타입 정의 ===
+interface Attachment {
+  id: string;
+  messageId: string;
+  fileName: string;
+  fileSize: number | null;
+  mimeType: string | null;
+  storageKey: string;
+  createdAt: string;
+  downloadUrl: string;
+}
+
+interface Message {
+  id: string;
+  conversationId: string;
+  role: "USER" | "ASSISTANT" | "SYSTEM";
+  content: string;
+  createdAt: string;
+  updatedAt: string;
+  isEdited: boolean;
+  isDeleted: boolean;
+  attachments: Attachment[]; // 백엔드에서 항상 배열로 내려오도록 맞춰둠
+}
+
+interface Conversation {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+const API_BASE = "http://127.0.0.1:4400"; // 같은 도메인에서 /api/ucon/... 로 프록시/리버스프록시된다고 가정
+
+const App: React.FC = () => {
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [selectedConversation, setSelectedConversation] =
+    useState<Conversation | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [newMessage, setNewMessage] = useState("");
+  const [loadingConvs, setLoadingConvs] = useState(false);
+  const [loadingMessages, setLoadingMessages] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // === 공통 fetch 헬퍼 ===
+  async function apiGet<T>(path: string): Promise<T> {
+    const res = await fetch(`${API_BASE}${path}`);
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`GET ${path} failed: ${res.status} ${text}`);
+    }
+    return (await res.json()) as T;
+  }
+
+  async function apiPost<T>(path: string, body: unknown): Promise<T> {
+    const res = await fetch(`${API_BASE}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`POST ${path} failed: ${res.status} ${text}`);
+    }
+    return (await res.json()) as T;
+  }
+
+  // === 1) 대화방 목록 로딩 ===
+  const loadConversations = async () => {
+    try {
+      setLoadingConvs(true);
+      setError(null);
+      const data = await apiGet<Conversation[]>(
+        "/api/ucon/iso/conversations"
+      );
+      setConversations(data);
+
+      // 아직 선택된 방이 없고, 목록이 있으면 첫 번째 자동 선택
+      if (!selectedConversation && data.length > 0) {
+        setSelectedConversation(data[0]);
+      }
+    } catch (e: any) {
+      console.error(e);
+      setError(e.message ?? "대화방 목록을 불러오는 중 오류가 발생했습니다.");
+    } finally {
+      setLoadingConvs(false);
+    }
+  };
+
+  // === 2) 특정 대화방의 메시지 목록 로딩 ===
+  const loadMessages = async (conversationId: string) => {
+    try {
+      setLoadingMessages(true);
+      setError(null);
+      const data = await apiGet<Message[]>(
+        `/api/ucon/iso/messages?conversationId=${conversationId}`
+      );
+      setMessages(data);
+    } catch (e: any) {
+      console.error(e);
+      setError(e.message ?? "메시지를 불러오는 중 오류가 발생했습니다.");
+    } finally {
+      setLoadingMessages(false);
+    }
+  };
+
+  // 첫 마운트 시 대화방 목록 로딩
+  useEffect(() => {
+    loadConversations().catch(console.error);
+  }, []);
+
+  // 선택된 대화방이 바뀔 때마다 메시지 로딩
+  useEffect(() => {
+    if (selectedConversation) {
+      loadMessages(selectedConversation.id).catch(console.error);
+    } else {
+      setMessages([]);
+    }
+  }, [selectedConversation?.id]);
+
+  // === 새 대화방 생성 ===
+  const handleCreateConversation = async () => {
+    const title = window.prompt("새 대화방 제목을 입력하세요:", "새 ISO 대화방");
+    if (!title) return;
+
+    try {
+      setError(null);
+      const created = await apiPost<Conversation>(
+        "/api/ucon/iso/conversations",
+        { title }
+      );
+      // 목록에 추가
+      const next = [created, ...conversations];
+      setConversations(next);
+      setSelectedConversation(created);
+    } catch (e: any) {
+      console.error(e);
+      setError(e.message ?? "대화방 생성 중 오류가 발생했습니다.");
+    }
+  };
+
+  // === 메시지 전송 ===
+  const handleSendMessage = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!selectedConversation) {
+      window.alert("먼저 대화방을 선택하세요.");
+      return;
+    }
+    if (!newMessage.trim()) return;
+
+    try {
+      setSending(true);
+      setError(null);
+
+      const created = await apiPost<Message>("/api/ucon/iso/messages", {
+        conversationId: selectedConversation.id,
+        role: "USER",
+        content: newMessage.trim(),
+      });
+
+      setNewMessage("");
+      // 단순히 앞에 추가하기보다, 전체를 다시 로딩해도 됨
+      // setMessages((prev) => [...prev, created]);
+      await loadMessages(selectedConversation.id);
+    } catch (e: any) {
+      console.error(e);
+      setError(e.message ?? "메시지 전송 중 오류가 발생했습니다.");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-900 text-slate-100 flex">
+      {/* === 왼쪽: 대화방 리스트 === */}
+      <aside className="w-64 border-r border-slate-700 flex flex-col">
+        <div className="p-4 border-b border-slate-700 flex items-center justify-between">
+          <div>
+            <div className="text-xs text-slate-400">UCONAI / ISO</div>
+            <div className="font-bold text-lg">대화방 목록</div>
+          </div>
+          <button
+            onClick={handleCreateConversation}
+            className="text-xs px-2 py-1 bg-emerald-500 hover:bg-emerald-400 text-slate-900 rounded"
+          >
+            + 새 방
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto">
+          {loadingConvs && (
+            <div className="p-4 text-sm text-slate-400">대화방 불러오는 중…</div>
+          )}
+          {!loadingConvs && conversations.length === 0 && (
+            <div className="p-4 text-sm text-slate-400">
+              아직 대화방이 없습니다.
+              <br />
+              [+ 새 방] 버튼으로 하나 생성해 보세요.
+            </div>
+          )}
+          {!loadingConvs &&
+            conversations.map((conv) => (
+              <button
+                key={conv.id}
+                onClick={() => setSelectedConversation(conv)}
+                className={`w-full text-left px-4 py-3 text-sm border-b border-slate-800 hover:bg-slate-800 ${
+                  selectedConversation?.id === conv.id
+                    ? "bg-slate-800 font-semibold"
+                    : ""
+                }`}
+              >
+                <div className="truncate">{conv.title}</div>
+                <div className="text-[10px] text-slate-500 mt-1">
+                  {new Date(conv.createdAt).toLocaleString()}
+                </div>
+              </button>
+            ))}
+        </div>
+      </aside>
+
+      {/* === 오른쪽: 메시지 영역 === */}
+      <main className="flex-1 flex flex-col">
+        {/* 상단 헤더 */}
+        <header className="border-b border-slate-700 px-6 py-4 flex items-center justify-between">
+          <div>
+            <div className="text-xs text-slate-400">UCONAI / ISO 엔진</div>
+            <div className="font-bold text-xl">
+              {selectedConversation
+                ? selectedConversation.title
+                : "대화방을 선택하세요"}
+            </div>
+          </div>
+          <div className="text-xs text-slate-400">
+            서버: <span className="text-emerald-400">/api/ucon/iso/…</span>
+          </div>
+        </header>
+
+        {/* 오류 출력 */}
+        {error && (
+          <div className="px-6 py-2 text-sm text-red-400 bg-red-950/40 border-b border-red-800">
+            오류: {error}
+          </div>
+        )}
+
+        {/* 메시지 목록 */}
+        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+          {loadingMessages && selectedConversation && (
+            <div className="text-sm text-slate-400">
+              메시지를 불러오는 중입니다…
+            </div>
+          )}
+
+          {!loadingMessages &&
+            selectedConversation &&
+            messages.length === 0 && (
+              <div className="text-sm text-slate-400">
+                아직 메시지가 없습니다. 아래 입력창에서 첫 메시지를 보내보세요.
+              </div>
+            )}
+
+          {!selectedConversation && (
+            <div className="text-sm text-slate-400">
+              왼쪽에서 대화방을 선택하거나 새로 생성해 주세요.
+            </div>
+          )}
+
+          {!loadingMessages &&
+            selectedConversation &&
+            messages.map((msg) => (
+              <div
+                key={msg.id}
+                className={`max-w-3xl ${
+                  msg.role === "USER" ? "ml-auto text-right" : "mr-auto text-left"
+                }`}
+              >
+                <div
+                  className={`inline-block rounded-lg px-4 py-2 text-sm whitespace-pre-wrap ${
+                    msg.role === "USER"
+                      ? "bg-emerald-500 text-slate-900"
+                      : "bg-slate-800 text-slate-100"
+                  }`}
+                >
+                  {msg.content}
+                </div>
+                <div className="text-[10px] text-slate-500 mt-1">
+                  {msg.role} · {new Date(msg.createdAt).toLocaleString()}
+                </div>
+
+                {/* 첨부파일 리스트 (이미 백엔드에서 downloadUrl 포함) */}
+                {msg.attachments && msg.attachments.length > 0 && (
+                  <div className="mt-1 border-l-4 border-blue-400 pl-3 text-xs text-left">
+                    {msg.attachments.map((att) => (
+                      <div key={att.id} className="mt-1">
+                        <a
+                          href={att.downloadUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-400 underline hover:text-blue-200"
+                        >
+                          📎 {att.fileName}{" "}
+                          {att.fileSize != null ? `(${att.fileSize} bytes)` : ""}
+                        </a>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+        </div>
+
+        {/* 메시지 입력 바 */}
+        <form
+          onSubmit={handleSendMessage}
+          className="border-t border-slate-700 px-6 py-3 flex items-center gap-3"
+        >
+          <textarea
+            className="flex-1 bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            rows={2}
+            placeholder={
+              selectedConversation
+                ? "여기에 메시지를 입력하고 Enter로 전송 (Shift+Enter 줄바꿈)…"
+                : "먼저 왼쪽에서 대화방을 선택하거나 생성해 주세요."
+            }
+            value={newMessage}
+            onChange={(e) => setNewMessage(e.target.value)}
+            disabled={!selectedConversation || sending}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                if (!sending) {
+                  handleSendMessage(e as any);
+                }
+              }
+            }}
+          />
+          <button
+            type="submit"
+            disabled={!selectedConversation || sending || !newMessage.trim()}
+            className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-600 text-slate-900 text-sm font-semibold rounded-md"
+          >
+            {sending ? "전송 중…" : "전송"}
+          </button>
+        </form>
+      </main>
+    </div>
+  );
+};
+
+export default App;

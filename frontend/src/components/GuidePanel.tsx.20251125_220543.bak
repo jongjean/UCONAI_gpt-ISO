@@ -12,24 +12,14 @@ export type GuidePanelProps = {
   conversationGuides: Guide[];
   activeConversationId: string | null;
   onCreateGuide: (scope: "global" | "conversation") => void;
-  onUpdateGuide: (guide: Guide) => Promise<Guide | void> | void;
+  onUpdateGuide: (guide: Guide) => void;
   onDeleteGuide: (id: string, scope: "global" | "conversation") => void;
-  onReloadGlobalGuides?: () => void;
-  onReloadRoomGuides?: (conversationId?: string | null) => void;
 };
 
 type Tab = "global" | "conversation";
 
 // 파일 중복 방지를 위한 시그니처
 const fileSignature = (f: File) => `${f.name}-${f.size}-${f.lastModified}`;
-
-const formatBytes = (bytes: number) => {
-  if (!bytes) return "0 B";
-  const sizes = ["B", "KB", "MB", "GB", "TB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(1024));
-  const val = bytes / Math.pow(1024, i);
-  return `${val.toFixed(val >= 10 ? 0 : 1)} ${sizes[i]}`;
-};
 
 const reorder = <T,>(list: T[], startIndex: number, endIndex: number): T[] => {
   const result = Array.from(list);
@@ -47,16 +37,8 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
   onCreateGuide,
   onUpdateGuide,
   onDeleteGuide,
-  onReloadGlobalGuides,
-  onReloadRoomGuides,
 }) => {
-  const initialTab = (): Tab => {
-    const saved = localStorage.getItem("guidePanelTab");
-    if (saved === "conversation" || saved === "global") return saved;
-    return "global";
-  };
-  const [tab, setTab] = useState<Tab>(initialTab);
-  const savedTabRef = useRef<Tab | null>(null);
+  const [tab, setTab] = useState<Tab>("global");
   const [editing, setEditing] = useState<Guide | null>(null);
 
   // 패널 위치/크기
@@ -78,39 +60,6 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
 
   const [orderedGuides, setOrderedGuides] = useState<Guide[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  // 탭 유지: 마지막 선택 탭을 localStorage에 저장/복원
-  useEffect(() => {
-    const savedTab = localStorage.getItem("guidePanelTab");
-    if (savedTab === "global" || savedTab === "conversation") {
-      savedTabRef.current = savedTab as Tab;
-      setTab(savedTab as Tab);
-    } else {
-      savedTabRef.current = tab;
-    }
-  }, []);
-
-  useEffect(() => {
-    localStorage.setItem("guidePanelTab", tab);
-    savedTabRef.current = tab;
-  }, [tab]);
-
-  // 활성 테마가 있을 때는 저장된 탭이 conversation이면 복원
-  // 활성 테마가 없으면 전역 탭으로 전환
-  useEffect(() => {
-    const savedTabVal = savedTabRef.current;
-    const savedIsConversation = savedTabVal === "conversation";
-    if (!activeConversationId) {
-      if (tab === "conversation") {
-        setTab("global");
-      }
-      return;
-    }
-    if (savedIsConversation) {
-      setTab("conversation");
-    } else if (tab === "conversation" && !savedIsConversation) {
-      setTab("global");
-    }
-  }, [activeConversationId, tab]);
     // 체크박스 선택 토글
     const toggleSelect = (id: string) => {
       setSelectedIds((prev) =>
@@ -122,68 +71,54 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
     const clearSelection = () => setSelectedIds([]);
 
     // 합치기(머지) 기능
-    const handleMergeGuides = async () => {
+    const handleMergeGuides = () => {
       if (selectedIds.length < 2) return;
       const guidesToMerge = orderedGuides.filter((g) => selectedIds.includes(g.id));
       if (guidesToMerge.length < 2) return;
-
-      const [primary] = guidesToMerge;
-      if (!primary) return;
-
-      const mergedTitle = guidesToMerge
-        .map((g, i) => (i === 0 ? g.title : `[${g.title || "제목없음"}]`))
-        .join(" ");
-      const mergedContent = guidesToMerge
-        .map((g) => g.content)
-        .filter(Boolean)
-        .join("\n\n");
+      // 제목: 첫번째 + 외 제목은 []로
+      const mergedTitle = guidesToMerge.map((g, i) => i === 0 ? g.title : `[${g.title || '제목없음'}]`).join(" ");
+      // 내용: 모두 합침(\n\n)
+      const mergedContent = guidesToMerge.map((g) => g.content).filter(Boolean).join("\n\n");
+      // 파일: 중복 없이 합침
       const fileMap = new Map<string, GuideFile>();
-      guidesToMerge.forEach((g) => (g.files || []).forEach((f) => fileMap.set(f.id, f)));
+      guidesToMerge.forEach(g => (g.files||[]).forEach(f => fileMap.set(f.id, f)));
       const mergedFiles = Array.from(fileMap.values());
       const now = new Date().toISOString();
-
       const mergedGuide: Guide = {
-        ...primary,
+        id: `merged-${Date.now()}`,
         title: mergedTitle,
         content: mergedContent,
         files: mergedFiles,
-        scope: tab === "global" ? "global" : "conversation",
-        conversationId:
-          tab === "conversation"
-            ? activeConversationId || primary.conversationId
-            : undefined,
+        createdAt: now,
         updatedAt: now,
+        scope: tab,
       };
-
-      // 나머지 지침(id) 목록
-      const restIds = guidesToMerge
-        .filter((g) => g.id !== primary.id)
-        .map((g) => g.id);
-
-      try {
-        // 서버 반영 (업데이트 후 실제 응답을 활용)
-        const updated = (await Promise.resolve(onUpdateGuide(mergedGuide))) || mergedGuide;
-
-        for (const id of restIds) {
-          await Promise.resolve(onDeleteGuide(id, tab));
-        }
-
-        // 성공 시 UI 반영: 병합 대상 제거 + 대표 지침 업데이트
-        const updatedList = orderedGuides
-          .filter((g) => !restIds.includes(g.id))
-          .map((g) => (g.id === primary.id ? updated : g));
-        setOrderedGuides(updatedList);
-        setEditing(updated);
-        clearSelection();
-        // 최신 상태 새로고침
-        if (tab === "global") {
-          onReloadGlobalGuides?.();
+      // 새 지침 추가 (신규 id이므로 update가 아니라 추가)
+      if (tab === "global") {
+        // global: globalGuides prop이므로 직접 추가 콜백 필요
+        if (typeof (window as any).addGlobalGuide === "function") {
+          (window as any).addGlobalGuide(mergedGuide);
         } else {
-          onReloadRoomGuides?.(activeConversationId);
+          // fallback: update로도 시도
+          onUpdateGuide(mergedGuide);
         }
-      } catch (err) {
-        console.error("merge guides failed", err);
+      } else if (tab === "conversation") {
+        if (typeof (window as any).addConversationGuide === "function") {
+          (window as any).addConversationGuide(mergedGuide);
+        } else {
+          onUpdateGuide(mergedGuide);
+        }
+      } else {
+        onUpdateGuide(mergedGuide);
       }
+      // 기존 지침 삭제 (합쳐진 것들만, 새로 추가된 mergedGuide는 삭제하지 않음)
+      setTimeout(() => {
+        guidesToMerge
+          .filter(g => g.id !== mergedGuide.id)
+          .forEach(g => onDeleteGuide(g.id, tab));
+      }, 200);
+      clearSelection();
+      setEditing(mergedGuide);
     };
   const currentList: Guide[] = tab === "global" ? globalGuides : conversationGuides;
 
@@ -319,7 +254,7 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
 
     const existing = new Set(
       (editing.files || []).map(
-        (f: GuideFile) => `${f.fileName}-${f.fileSize}-${f.createdAt ?? ""}`
+        (f: GuideFile) => `${f.name}-${f.size}-${f.createdAt ?? ""}`
       )
     );
 
@@ -331,11 +266,10 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
     const now = new Date().toISOString();
     const newGuideFiles: GuideFile[] = filtered.map((f) => ({
       id: `gf-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-      fileName: f.name,
-      fileSize: f.size,
-      mimeType: f.type,
-      storageKey: "",
-      downloadUrl: "",
+      name: f.name,
+      size: f.size,
+      type: f.type,
+      url: "",
       createdAt: now,
     }));
 
@@ -372,9 +306,16 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
     e.target.value = "";
   };
 
-  // 삭제 버튼은 노출하되 실제 파일은 보존 (서버 정책)
-  const handleRemoveGuideFile = () => {
-    window.alert("서버 보존 정책으로 첨부파일은 삭제되지 않습니다.");
+  const handleRemoveGuideFile = (fileId: string) => {
+    if (!editing) return;
+    const now = new Date().toISOString();
+    const updated: Guide = {
+      ...editing,
+      files: (editing.files || []).filter((f) => f.id !== fileId),
+      updatedAt: now,
+    };
+    setEditing(updated);
+    onUpdateGuide(updated);
   };
 
   /* ------------------------------------------------
@@ -416,6 +357,9 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
           inset: 0,
           background: "rgba(0,0,0,0.45)",
           zIndex: 1000,
+        }}
+        onClick={() => {
+          if (!dragging && !resizing) onClose();
         }}
       />
 
@@ -866,11 +810,11 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
                             textOverflow: "ellipsis",
                           }}
                         >
-                          {f.fileName || "(파일명 없음)"} ({formatBytes(f.fileSize || 0)})
+                          {f.name}
                         </span>
                         <button
                           type="button"
-                          onClick={() => handleRemoveGuideFile()}
+                          onClick={() => handleRemoveGuideFile(f.id)}
                           style={{
                             border: 0,
                             background: "transparent",
@@ -881,7 +825,6 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
                         >
                           삭제
                         </button>
-                        {/* 삭제 버튼 제거 (영구 보존) */}
                       </div>
                     ))}
                   </div>

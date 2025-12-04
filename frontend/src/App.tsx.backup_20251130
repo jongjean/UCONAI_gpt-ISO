@@ -1,0 +1,400 @@
+import { useEffect, useState } from "react";
+
+const API_BASE =
+  import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:4400";
+
+// ==== 타입 정의 ====
+interface Attachment {
+  id: string | number;
+  filename: string;
+  downloadUrl: string;
+}
+
+interface Message {
+  id: string | number;
+  role: "user" | "assistant" | "system";
+  content: string;
+  createdAt: string;
+  attachments?: Attachment[];
+}
+
+interface Conversation {
+  id: string | number;
+  title: string;
+  createdAt: string;
+}
+
+// presign-upload 응답 형태 (백엔드 구현에 맞게 필드명만 조정하면 됨)
+interface PresignUploadResponse {
+  uploadUrl: string;
+  storageKey: string;
+  messageId: string | number; // presign 시 생성된 messageId
+}
+
+// ==== API 함수 ====
+
+// 대화방 목록
+async function fetchConversations(): Promise<Conversation[]> {
+  const res = await fetch(`${API_BASE}/api/ucon/iso/conversations`);
+  if (!res.ok) throw new Error("Failed to load conversations");
+  const data = await res.json();
+  // curl 결과가 바로 배열이므로 배열 우선 처리
+  return Array.isArray(data) ? data : data.items ?? [];
+}
+
+// 메시지 목록
+async function fetchMessages(
+  conversationId: string | number
+): Promise<Message[]> {
+  const url = new URL(`${API_BASE}/api/ucon/iso/messages`);
+  url.searchParams.set("conversationId", String(conversationId));
+
+  const res = await fetch(url.toString());
+  if (!res.ok) throw new Error("Failed to load messages");
+  const data = await res.json();
+  return Array.isArray(data) ? data : data.items ?? [];
+}
+
+// 텍스트 메시지 전송
+async function sendMessage(params: {
+  conversationId: string | number;
+  content: string;
+}): Promise<Message> {
+  const res = await fetch(`${API_BASE}/api/ucon/iso/messages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) throw new Error("Failed to send message");
+  return res.json();
+}
+
+// 파일 presign 요청
+async function presignUploadForMessage(params: {
+  conversationId: string | number;
+  filename: string;
+  size: number;
+  mimeType: string;
+}): Promise<PresignUploadResponse> {
+  // ※ 백엔드 구현에 맞게 body 필드명만 맞춰주면 됩니다.
+  // 예: engine: "iso", type: "message", conversationId + 파일 메타 정보
+  const res = await fetch(`${API_BASE}/api/ucon/files/presign-upload`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      engine: "iso",
+      type: "message",
+      conversationId: params.conversationId,
+      filename: params.filename,
+      size: params.size,
+      mimeType: params.mimeType,
+    }),
+  });
+
+  if (!res.ok) throw new Error("Failed to presign upload");
+  return res.json();
+}
+
+// 파일 commit 요청
+async function commitUploadedFile(params: {
+  messageId: string | number;
+  filename: string;
+  storageKey: string;
+  size: number;
+}) {
+  // 여기도 백엔드 스펙에 맞게 필드만 조정
+  // (curl 예시: engine / type / ownerId / originalFilename / storageKey / size ...)
+  const res = await fetch(`${API_BASE}/api/ucon/files/commit`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      engine: "iso",
+      type: "message",
+      ownerId: params.messageId,
+      originalFilename: params.filename,
+      storageKey: params.storageKey,
+      size: params.size,
+    }),
+  });
+
+  if (!res.ok) throw new Error("Failed to commit uploaded file");
+  return res.json();
+}
+
+// ==== 메인 컴포넌트 ====
+function App() {
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [selectedConvId, setSelectedConvId] = useState<
+    string | number | null
+  >(null);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [loadingConvs, setLoadingConvs] = useState(false);
+  const [loadingMessages, setLoadingMessages] = useState(false);
+  const [newMessage, setNewMessage] = useState("");
+  const [sending, setSending] = useState(false);
+
+  // 파일 업로드 상태
+  const [uploading, setUploading] = useState(false);
+  const [uploadFileName, setUploadFileName] = useState<string | null>(null);
+
+  // 초기 대화방 로딩
+  useEffect(() => {
+    const loadConversations = async () => {
+      try {
+        setLoadingConvs(true);
+        const list = await fetchConversations();
+        setConversations(list);
+        if (list.length > 0) {
+          setSelectedConvId(list[0].id);
+        }
+      } catch (err) {
+        console.error("Failed to load conversations", err);
+      } finally {
+        setLoadingConvs(false);
+      }
+    };
+
+    loadConversations();
+  }, []);
+
+  // 대화방 선택 시 메시지 로딩
+  useEffect(() => {
+    if (!selectedConvId) return;
+
+    const loadMessages = async () => {
+      try {
+        setLoadingMessages(true);
+        const list = await fetchMessages(selectedConvId);
+        setMessages(list);
+      } catch (err) {
+        console.error("Failed to load messages", err);
+      } finally {
+        setLoadingMessages(false);
+      }
+    };
+
+    loadMessages();
+  }, [selectedConvId]);
+
+  const handleSend = async () => {
+    if (!selectedConvId || !newMessage.trim()) return;
+    try {
+      setSending(true);
+      const msg = await sendMessage({
+        conversationId: selectedConvId,
+        content: newMessage.trim(),
+      });
+      setMessages((prev) => [...prev, msg]);
+      setNewMessage("");
+    } catch (err) {
+      console.error("Failed to send message", err);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  // 파일 선택 핸들러
+  const handleFileChange = async (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = e.target.files?.[0];
+    // 같은 input으로 두 번 연속 업로드할 수 있게 value 초기화
+    e.target.value = "";
+
+    if (!file) return;
+    if (!selectedConvId) {
+      alert("먼저 대화방을 선택해 주세요.");
+      return;
+    }
+
+    try {
+      setUploading(true);
+      setUploadFileName(file.name);
+
+      // 1) presign 요청 → uploadUrl / storageKey / messageId 받기
+      const presign = await presignUploadForMessage({
+        conversationId: selectedConvId,
+        filename: file.name,
+        size: file.size,
+        mimeType: file.type || "application/octet-stream",
+      });
+
+      // 2) MinIO로 실제 파일 PUT 업로드
+      await fetch(presign.uploadUrl, {
+        method: "PUT",
+        body: file,
+        headers: {
+          "Content-Type": file.type || "application/octet-stream",
+        },
+      });
+
+      // 3) commit 호출 → DB MessageAttachment 생성
+      await commitUploadedFile({
+        messageId: presign.messageId,
+        filename: file.name,
+        storageKey: presign.storageKey,
+        size: file.size,
+      });
+
+      // 4) 업로드 반영된 메시지 목록 다시 불러오기
+      const updated = await fetchMessages(selectedConvId);
+      setMessages(updated);
+    } catch (err) {
+      console.error("FILE UPLOAD ERROR", err);
+      alert("파일 업로드 중 오류가 발생했습니다. 콘솔 로그를 확인하세요.");
+    } finally {
+      setUploading(false);
+      setUploadFileName(null);
+    }
+  };
+
+  return (
+    <div className="h-screen bg-slate-950 text-slate-100 flex">
+      {/* 왼쪽: Conversation 리스트 */}
+      <aside className="w-64 border-r border-slate-800 flex flex-col">
+        <div className="p-3 border-b border-slate-800 text-sm font-semibold">
+          ISO Conversations
+        </div>
+        <div className="flex-1 overflow-y-auto">
+          {loadingConvs ? (
+            <div className="p-3 text-xs text-slate-400">Loading...</div>
+          ) : conversations.length === 0 ? (
+            <div className="p-3 text-xs text-slate-500">
+              No conversations yet.
+            </div>
+          ) : (
+            conversations.map((c) => (
+              <button
+                key={c.id}
+                onClick={() => setSelectedConvId(c.id)}
+                className={[
+                  "w-full text-left px-3 py-2 text-xs border-b border-slate-900 hover:bg-slate-900/60",
+                  selectedConvId === c.id ? "bg-slate-900" : "",
+                ].join(" ")}
+              >
+                <div className="font-medium truncate">{c.title}</div>
+                <div className="text-[10px] text-slate-500">
+                  {new Date(c.createdAt).toLocaleString()}
+                </div>
+              </button>
+            ))
+          )}
+        </div>
+      </aside>
+
+      {/* 가운데: Chat 영역 */}
+      <main className="flex-1 flex flex-col">
+        <div className="p-3 border-b border-slate-800 text-sm font-semibold flex items-center justify-between">
+          <span>ISO Chat</span>
+          {selectedConvId && (
+            <span className="text-[11px] text-slate-500">
+              Conversation ID: {String(selectedConvId)}
+            </span>
+          )}
+        </div>
+
+        {/* 메시지 리스트 */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-3 text-sm">
+          {loadingMessages ? (
+            <div className="text-xs text-slate-400">Loading messages...</div>
+          ) : messages.length === 0 ? (
+            <div className="text-xs text-slate-500">
+              No messages. Start the conversation.
+            </div>
+          ) : (
+            messages.map((m) => (
+              <div key={m.id} className="space-y-1">
+                <div className="text-[11px] text-slate-500">
+                  {m.role.toUpperCase()} ·{" "}
+                  {new Date(m.createdAt).toLocaleTimeString()}
+                </div>
+                <div
+                  className={[
+                    "inline-block px-3 py-2 rounded-lg text-sm whitespace-pre-wrap",
+                    m.role === "user"
+                      ? "bg-sky-600/80"
+                      : "bg-slate-800/80 border border-slate-700",
+                  ].join(" ")}
+                >
+                  {m.content}
+                </div>
+                {m.attachments && m.attachments.length > 0 && (
+                  <div className="mt-1 flex flex-wrap gap-2 text-[11px]">
+                    {m.attachments.map((a) => (
+                      <a
+                        key={a.id}
+                        href={a.downloadUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="px-2 py-1 border border-slate-600 rounded-full hover:bg-slate-800"
+                      >
+                        📎 {a.filename}
+                      </a>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))
+          )}
+        </div>
+
+        {/* 메시지 입력 + 파일 업로드 바 */}
+        <div className="border-t border-slate-800 p-3 space-y-2">
+          {/* 파일 업로드 영역 */}
+          <div className="flex items-center justify-between gap-3 text-[11px]">
+            <div className="flex items-center gap-2">
+              <label className="inline-flex items-center gap-2 px-2 py-1 border border-slate-700 rounded-md text-xs cursor-pointer hover:bg-slate-900">
+                <span>{uploading ? "업로드 중..." : "📎 파일 선택"}</span>
+                <input
+                  type="file"
+                  className="hidden"
+                  onChange={handleFileChange}
+                  disabled={uploading || !selectedConvId}
+                />
+              </label>
+              {uploadFileName && (
+                <span className="text-slate-400 truncate max-w-[180px]">
+                  {uploadFileName}
+                </span>
+              )}
+            </div>
+            <div className="text-slate-500">
+              선택한 파일은 presign → PUT → commit 후 메시지에 자동 반영됩니다.
+            </div>
+          </div>
+
+          {/* 텍스트 입력 */}
+          <div className="flex gap-2">
+            <textarea
+              className="flex-1 text-xs bg-slate-900 border border-slate-700 rounded-md px-2 py-1 resize-none h-16 focus:outline-none focus:ring-1 focus:ring-sky-500"
+              placeholder="메시지를 입력하세요..."
+              value={newMessage}
+              onChange={(e) => setNewMessage(e.target.value)}
+            />
+            <button
+              onClick={handleSend}
+              disabled={sending || !newMessage.trim() || !selectedConvId}
+              className="w-24 text-xs font-semibold bg-sky-600 hover:bg-sky-500 disabled:bg-slate-700 disabled:cursor-not-allowed rounded-md"
+            >
+              {sending ? "Sending..." : "Send"}
+            </button>
+          </div>
+        </div>
+      </main>
+
+      {/* 오른쪽: Guide 영역 (향후 확장) */}
+      <aside className="w-72 border-l border-slate-800 flex flex-col">
+        <div className="p-3 border-b border-slate-800 text-sm font-semibold">
+          Guides
+        </div>
+        <div className="flex-1 p-3 text-xs text-slate-400">
+          - GLOBAL / CONVERSATION 단위 지침 목록  
+          - 각 지침에 첨부파일 표시  
+          - ISO PWI 26255 공통 지침 등 표시 예정
+        </div>
+      </aside>
+    </div>
+  );
+}
+
+export default App;

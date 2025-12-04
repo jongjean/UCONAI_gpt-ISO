@@ -1,0 +1,146 @@
+import React, { useState } from "react";
+
+type ChatMessage = {
+  role: "user" | "ai"; // CSS에서 user / ai 를 쓰고 있어서 여기도 맞춰줌
+  content: string;
+};
+
+export default function MainChat() {
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSend() {
+    if (!input.trim() || loading) return;
+
+    const userMessage = input.trim();
+    setInput("");
+    setError(null);
+
+    // ① 사용자 메시지 먼저 추가
+    setMessages((prev) => [
+      ...prev,
+      { role: "user", content: userMessage },
+    ]);
+
+    try {
+      setLoading(true);
+
+      // ② 백엔드 ISO 챗 엔드포인트 호출
+      const res = await fetch("http://localhost:4400/api/iso-chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: userMessage }),
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        console.error("iso-chat error response:", text);
+        setError(`서버 오류 (${res.status})`);
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "ai",
+            content:
+              "서버에서 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
+          },
+        ]);
+        return;
+      }
+
+      const data = await res.json();
+      console.log("[FE] /api/iso-chat response:", data);
+
+      // 백엔드 응답 구조:
+      // { reply: { role: "assistant", content: "...", ... }, model: "gpt-5.1" }
+      const assistantText =
+        data?.reply?.content ?? "응답 내용이 비어 있습니다.";
+
+      // ④ GPT(assistant) 메시지 추가
+      setMessages((prev) => [
+        ...prev,
+        { role: "ai", content: assistantText },
+      ]);
+    } catch (err) {
+      console.error("iso-chat fetch error:", err);
+      setError("네트워크 오류가 발생했습니다.");
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "ai",
+            content:
+              "네트워크 오류가 발생했습니다. 인터넷 연결 또는 서버 상태를 확인해주세요.",
+        },
+      ]);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      void handleSend();
+    }
+  }
+
+  return (
+    <div className="iso-chat-root">
+      {/* 상단 제목 영역 - 기존 디자인에 맞게 CSS로 꾸밀 수 있음 */}
+      <div className="iso-chat-header">
+        <h2 className="iso-chat-title">ISO/IEC 개발 AI 서포터 - 유코나이</h2>
+        <p className="iso-chat-subtitle">
+          ISO/IEC 관련 질문을 입력하면 이 영역에서 대화가 진행됩니다.
+        </p>
+      </div>
+
+      {/* 메시지 영역 */}
+      <div className="iso-chat-body">
+        {messages.length === 0 ? (
+          <div className="iso-chat-empty">
+            아직 대화가 없습니다. 아래 입력창에 첫 질문을 입력해 주세요.
+          </div>
+        ) : (
+          <div className="iso-chat-messages">
+            {messages.map((msg, idx) => (
+              <div
+                key={idx}
+                className={
+                  "iso-chat-bubble " + (msg.role === "user" ? "user" : "ai")
+                }
+              >
+                <div className="iso-chat-bubble-role">
+                  {msg.role === "user" ? "나" : "유코나이-ISO Expert"}
+                </div>
+                <div className="iso-chat-bubble-content">{msg.content}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* 에러 메시지 */}
+      {error && <div className="iso-chat-error">{error}</div>}
+
+      {/* 입력 영역 */}
+      <div className="iso-chat-input-row">
+        <input
+          className="iso-chat-input"
+          type="text"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="예: ISO/IEC 27001, TR 25468, PWI 26255 등에 대해 질문해 보세요..."
+        />
+        <button
+          className="iso-chat-send-button"
+          onClick={handleSend}
+          disabled={loading}
+        >
+          {loading ? "생각 중..." : "전송"}
+        </button>
+      </div>
+    </div>
+  );
+}

@@ -1,0 +1,401 @@
+import React, { useEffect, useRef, useState } from "react";
+import "./App.css";
+
+import { fetchModels, requestIsoChat } from "./api/isoChatApi";
+
+import {
+  ModelOption,
+  RunMode,
+  AnswerMode,
+  Message,
+  Conversation,
+  Guide,
+  AttachedFile,
+} from "./types/isoChat";
+
+import Sidebar from "./components/Sidebar";
+import ChatPanel from "./components/ChatPanel";
+import Rightbar from "./components/Rightbar";
+import GuidePanel from "./components/GuidePanel";
+
+const App: React.FC = () => {
+  /* --------------------------------
+   * 1. 모델 / 실행 모드 상태
+   * -------------------------------- */
+  const [model, setModel] = useState<ModelOption>("gpt-5.1");
+  const [modelList, setModelList] = useState<{ id: string; label: string }[]>(
+    []
+  );
+  const [runMode, setRunMode] = useState<RunMode>("responses");
+  const [answerMode, setAnswerMode] = useState<AnswerMode>("strict");
+
+  useEffect(() => {
+    fetchModels()
+      .then((models) => setModelList(models))
+      .catch(() => {
+        setModelList([
+          { id: "gpt-5.1", label: "gpt-5.1" },
+          { id: "gpt-4.1", label: "gpt-4.1" },
+          { id: "gpt-4.1-mini", label: "gpt-4.1-mini" },
+        ]);
+      });
+  }, []);
+
+  /* --------------------------------
+   * 2. 대화방 / 메시지 상태
+   * -------------------------------- */
+  const [conversations, setConversations] = useState<Conversation[]>(() => {
+    const saved = localStorage.getItem("conversations");
+    if (!saved) return [];
+    try {
+      return JSON.parse(saved) as Conversation[];
+    } catch {
+      return [];
+    }
+  });
+
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+
+  // conversations 변경 시 로컬스토리지 동기화
+  useEffect(() => {
+    localStorage.setItem("conversations", JSON.stringify(conversations));
+  }, [conversations]);
+
+  // 초기 활성 테마 자동 지정
+  useEffect(() => {
+    if (!activeConversationId && conversations.length > 0) {
+      setActiveConversationId(conversations[0].id);
+    }
+  }, [conversations, activeConversationId]);
+
+  const activeConversation: Conversation | null =
+    conversations.find((c) => c.id === activeConversationId) || null;
+
+  const handleNewConversation = () => {
+    const id = `c-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const conv: Conversation = {
+      id,
+      title: "새 테마",
+      createdAt: new Date().toLocaleString(),
+      messages: [],
+    };
+    setConversations((prev) => [conv, ...prev]);
+    setActiveConversationId(id);
+  };
+
+  const handleDeleteConversation = (id: string) => {
+    setConversations((prev) => {
+      const filtered = prev.filter((c) => c.id !== id);
+      if (id === activeConversationId) {
+        setActiveConversationId(filtered[0]?.id ?? null);
+      }
+      return filtered;
+    });
+  };
+
+  /* --------------------------------
+   * 3. 테마 제목 인라인 수정
+   * -------------------------------- */
+  const [editingConvId, setEditingConvId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState("");
+
+  const handleEditTitleStart = (conv: Conversation) => {
+    setEditingConvId(conv.id);
+    setEditingTitle(conv.title);
+  };
+
+  const handleEditTitleSave = (id: string) => {
+    setConversations((prev) =>
+      prev.map((c: Conversation) =>
+        c.id === id
+          ? {
+              ...c,
+              title: editingTitle.trim() || c.title,
+            }
+          : c
+      )
+    );
+    setEditingConvId(null);
+    setEditingTitle("");
+  };
+
+  /* --------------------------------
+   * 4. 지침 / 가이드 상태
+   * -------------------------------- */
+  const [globalGuides, setGlobalGuides] = useState<Guide[]>([]);
+  const [conversationGuides, setConversationGuides] = useState<
+    Record<string, Guide[]>
+  >({});
+  const [isGuidePanelOpen, setIsGuidePanelOpen] = useState(false);
+
+  const activeConvGuides: Guide[] = activeConversationId
+    ? conversationGuides[activeConversationId] || []
+    : [];
+
+  const handleCreateGuide = (scope: "global" | "conversation") => {
+    const id = `g-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const base: Guide = {
+      id,
+      scope,
+      conversationId:
+        scope === "conversation" ? activeConversationId || undefined : undefined,
+      title: "",
+      content: "",
+      files: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    if (scope === "global") {
+      setGlobalGuides((prev) => [base, ...prev]);
+    } else if (activeConversationId) {
+      setConversationGuides((prev) => ({
+        ...prev,
+        [activeConversationId]: [base, ...(prev[activeConversationId] || [])],
+      }));
+    }
+  };
+
+  const handleUpdateGuide = (guide: Guide) => {
+    if (guide.scope === "global") {
+      setGlobalGuides((prev) => {
+        const idx = prev.findIndex((g) => g.id === guide.id);
+        if (idx === -1) return [guide, ...prev];
+        return prev.map((g) => (g.id === guide.id ? guide : g));
+      });
+      return;
+    }
+
+    if (guide.scope === "conversation") {
+      const convId = guide.conversationId;
+      if (!convId) return; // 안전장치
+
+      setConversationGuides((prev) => {
+        const list: Guide[] = prev[convId] || [];
+        const idx = list.findIndex((g) => g.id === guide.id);
+        if (idx === -1) {
+          return {
+            ...prev,
+            [convId]: [guide, ...list],
+          };
+        }
+        return {
+          ...prev,
+          [convId]: list.map((g) => (g.id === guide.id ? guide : g)),
+        };
+      });
+    }
+  };
+
+  const handleDeleteGuide = (id: string, scope: "global" | "conversation") => {
+    if (scope === "global") {
+      setGlobalGuides((prev) => prev.filter((g: Guide) => g.id !== id));
+      return;
+    }
+
+    if (scope === "conversation") {
+      const convId = activeConversationId;
+      if (!convId) return; // 안전장치
+
+      setConversationGuides((prev) => {
+        const list: Guide[] = prev[convId] || [];
+        return {
+          ...prev,
+          [convId]: list.filter((g: Guide) => g.id !== id),
+        };
+      });
+    }
+  };
+
+  /* --------------------------------
+   * 5. 첨부 파일 상태
+   * -------------------------------- */
+  const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleDrop = (e: React.DragEvent<HTMLTextAreaElement>) => {
+    e.preventDefault();
+    const files = Array.from(e.dataTransfer.files || []);
+    if (!files.length) return;
+
+    setAttachedFiles((prev) => [
+      ...prev,
+      ...files.map<AttachedFile>((file) => ({
+        id: `af-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        name: file.name,
+        file,
+      })),
+    ]);
+  };
+
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+
+    setAttachedFiles((prev) => [
+      ...prev,
+      ...files.map<AttachedFile>((file) => ({
+        id: `af-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        name: file.name,
+        file,
+      })),
+    ]);
+
+    e.target.value = "";
+  };
+
+  const handleRemoveAttachedFile = (id: string) => {
+    setAttachedFiles((prev) => prev.filter((f) => f.id !== id));
+  };
+
+  /* --------------------------------
+   * 6. 입력 / 전송 / 에러 상태
+   * -------------------------------- */
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSubmit = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!activeConversationId) return;
+
+    const trimmed = input.trim();
+    if (!trimmed) return;
+
+    const currentConv = conversations.find((c) => c.id === activeConversationId);
+    if (!currentConv) return;
+
+    const userMsg: Message = { role: "user", content: trimmed };
+    const newMessages = [...currentConv.messages, userMsg];
+
+    // 1) UI 먼저 업데이트
+    setConversations((prev) =>
+      prev.map((c: Conversation) =>
+        c.id === activeConversationId ? { ...c, messages: newMessages } : c
+      )
+    );
+    setInput("");
+    setLoading(true);
+    setError(null);
+
+    try {
+      const payload = {
+        model,
+        runMode,
+        answerMode,
+        messages: newMessages,
+        globalGuides: globalGuides.map((g: Guide) => ({
+          id: g.id,
+          title: g.title,
+          content: g.content,
+        })),
+        convGuides: activeConvGuides.map((g: Guide) => ({
+          id: g.id,
+          title: g.title,
+          content: g.content,
+        })),
+      };
+
+      const res = await requestIsoChat(payload);
+      const assistantText: string =
+        res?.reply?.content || res?.reply || res?.content || "";
+
+      const assistantMsg: Message = {
+        role: "assistant",
+        content:
+          assistantText && assistantText.trim().length > 0
+            ? assistantText
+            : "유효한 정보를 찾지 못했습니다. 추가 기초 정보를 제공해 주시면 더 정확한 답변을 드리겠습니다.",
+      };
+
+      setConversations((prev) =>
+        prev.map((c: Conversation) =>
+          c.id === activeConversationId
+            ? { ...c, messages: [...c.messages, assistantMsg] }
+            : c
+        )
+      );
+    } catch (err: any) {
+      console.error(err);
+      setError(
+        err?.message ||
+          "ISO Expert 서버 호출 중 오류가 발생했습니다. 서버 로그를 확인해 주세요."
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  /* --------------------------------
+   * 7. 렌더링: 조립만 담당
+   * -------------------------------- */
+  return (
+    <div className="iso-app-root">
+      {/* 좌측: 테마/대화 리스트 (Sidebar 컴포넌트) */}
+      <Sidebar
+        conversations={conversations}
+        activeConversationId={activeConversationId || ""}
+        onNewConversation={handleNewConversation}
+        onSelectConversation={setActiveConversationId}
+        onDeleteConversation={handleDeleteConversation}
+        editingConvId={editingConvId}
+        editingTitle={editingTitle}
+        onEditTitleStart={handleEditTitleStart}
+        onEditTitleSave={handleEditTitleSave}
+        setEditingTitle={setEditingTitle}
+        onOpenGuidePanel={() => setIsGuidePanelOpen(true)}
+        setEditingConvId={setEditingConvId}
+        onReorderConversations={(from, to) => {
+          setConversations((prev) => {
+            const arr = [...prev];
+            const [removed] = arr.splice(from, 1);
+            arr.splice(to, 0, removed);
+            return arr;
+          });
+        }}
+      />
+
+      {/* 중앙: 채팅 패널 */}
+      <ChatPanel
+        activeConversation={activeConversation}
+        attachedFiles={attachedFiles}
+        input={input}
+        loading={loading}
+        error={error}
+        onChangeInput={setInput}
+        onSubmit={handleSubmit}
+        onDrop={handleDrop}
+        onRemoveAttachedFile={handleRemoveAttachedFile}
+        fileInputRef={fileInputRef}
+        onFileInputChange={handleFileInputChange}
+      />
+
+      {/* 우측: 설정/상태 패널 */}
+      <Rightbar
+        model={model}
+        setModel={(v) => setModel(v as ModelOption)}
+        modelList={modelList}
+        runMode={runMode}
+        setRunMode={(v) => setRunMode(v as RunMode)}
+        answerMode={answerMode}
+        setAnswerMode={(v) => setAnswerMode(v as AnswerMode)}
+        attachedFiles={attachedFiles}
+        onRemoveFile={handleRemoveAttachedFile}
+      />
+
+      {/* 플로팅 지침/가이드 패널 (GuidePanel.tsx는 기존 버전 유지) */}
+      <GuidePanel
+        isOpen={isGuidePanelOpen}
+        onClose={() => setIsGuidePanelOpen(false)}
+        globalGuides={globalGuides}
+        conversationGuides={activeConvGuides}
+        activeConversationId={activeConversationId}
+        onCreateGuide={handleCreateGuide}
+        onUpdateGuide={handleUpdateGuide}
+        onDeleteGuide={handleDeleteGuide}
+      />
+    </div>
+  );
+};
+
+export default App;

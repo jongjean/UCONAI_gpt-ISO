@@ -1,3 +1,5 @@
+# 백업 및 대용량 압축파일 푸시 제외
+*.tar.gz
 # Node
 node_modules
 npm-debug.log

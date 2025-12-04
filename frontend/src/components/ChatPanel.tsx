@@ -59,6 +59,83 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
     });
   }, [activeConversation?.id, activeConversation?.messages.length]);
 
+  const [hiddenMessages, setHiddenMessages] = React.useState<Set<string>>(new Set());
+  const [confirmTarget, setConfirmTarget] = React.useState<string | null>(null);
+
+  const storageKey = React.useMemo(
+    () => (activeConversation?.id ? `hiddenMessages:${activeConversation.id}` : "hiddenMessages:none"),
+    [activeConversation?.id]
+  );
+
+  React.useEffect(() => {
+    try {
+      const raw = localStorage.getItem(storageKey);
+      if (raw) {
+        const arr: string[] = JSON.parse(raw);
+        setHiddenMessages(new Set(arr));
+        return;
+      }
+    } catch {
+      // ignore parse errors
+    }
+    setHiddenMessages(new Set());
+  }, [storageKey]);
+
+  const persistHidden = (next: Set<string>) => {
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(Array.from(next)));
+    } catch {
+      // ignore storage errors
+    }
+  };
+
+  const hideMessage = (key: string) => {
+    setHiddenMessages((prev) => {
+      const next = new Set(prev);
+      next.add(key);
+      persistHidden(next);
+      return next;
+    });
+  };
+
+  const [hiddenAttIds, setHiddenAttIds] = React.useState<Set<string>>(new Set());
+
+  const attStorageKey = React.useMemo(
+    () =>
+      activeConversation?.id
+        ? `hiddenAtt:${activeConversation.id}`
+        : null,
+    [activeConversation?.id]
+  );
+
+  const loadHiddenAtt = React.useCallback(() => {
+    if (!attStorageKey) {
+      setHiddenAttIds(new Set());
+      return;
+    }
+    try {
+      const raw = localStorage.getItem(attStorageKey);
+      if (!raw) {
+        setHiddenAttIds(new Set());
+        return;
+      }
+      const arr: string[] = JSON.parse(raw);
+      setHiddenAttIds(new Set(Array.isArray(arr) ? arr : []));
+    } catch {
+      setHiddenAttIds(new Set());
+    }
+  }, [attStorageKey]);
+
+  React.useEffect(() => {
+    loadHiddenAtt();
+  }, [loadHiddenAtt, activeConversation?.id, activeConversation?.messages.length]);
+
+  React.useEffect(() => {
+    const handler = () => loadHiddenAtt();
+    window.addEventListener("hiddenAttUpdated", handler);
+    return () => window.removeEventListener("hiddenAttUpdated", handler);
+  }, [loadHiddenAtt]);
+
   const renderMessages = () => {
     if (!activeConversation || activeConversation.messages.length === 0) {
       return (
@@ -75,10 +152,32 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
       );
     }
 
-    return activeConversation.messages.map(
-      (msg: Message, idx: number) => (
+    return activeConversation.messages.map((msg: Message, idx: number) => {
+      const msgKey = msg.id || `local-${idx}`;
+      if (hiddenMessages.has(msgKey)) return null;
+
+      const hideButton = (
+        <button
+          type="button"
+          aria-label="메시지 숨기기"
+          onClick={() => setConfirmTarget(msgKey)}
+          style={{
+            border: 0,
+            background: "transparent",
+            color: "#9ca3af",
+            fontSize: 10,
+            cursor: "pointer",
+            padding: 0,
+            lineHeight: 1,
+          }}
+        >
+          ×
+        </button>
+      );
+
+      return (
         <div
-          key={idx}
+          key={msgKey}
           style={{
             display: "flex",
             justifyContent: msg.role === "user" ? "flex-end" : "flex-start",
@@ -101,6 +200,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
                   msg.role === "user" ? "flex-end" : "flex-start",
               }}
             >
+              {msg.role !== "user" && <span style={{ marginRight: 6 }}>{hideButton}</span>}
               <span
                 style={{
                   background: "#5b21b6",
@@ -118,12 +218,65 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
               >
                 {msg.role === "user" ? "강박사님" : "유코나이-ISO Expert"}
               </span>
+              {msg.role === "user" && <span style={{ marginLeft: 6 }}>{hideButton}</span>}
             </div>
+            {msg.createdAt && (
+              <div
+                style={{
+                  fontSize: 10,
+                  color: "#9ca3af",
+                  marginBottom: 6,
+                  textAlign: msg.role === "user" ? "right" : "left",
+                }}
+              >
+                {new Date(msg.createdAt).toLocaleString("ko-KR")}
+              </div>
+            )}
             <div className="iso-chat-bubble-content">{msg.content}</div>
+            {msg.attachments && msg.attachments.length > 0 && (
+              <div
+                style={{
+                  marginTop: 6,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 4,
+                  fontSize: 12,
+                }}
+              >
+                {msg.attachments.map((att) => {
+                  const isHidden = att.id && hiddenAttIds.has(att.id);
+                  if (isHidden) {
+                    return (
+                      <span
+                        key={att.id || att.storageKey}
+                        style={{ color: "#9ca3af", fontStyle: "italic" }}
+                      >
+                        📎 삭제됨
+                      </span>
+                    );
+                  }
+                  return (
+                    <a
+                      key={att.id || att.storageKey}
+                      href={att.downloadUrl || "#"}
+                      target={att.downloadUrl ? "_blank" : undefined}
+                      rel="noreferrer"
+                      style={{
+                        color: "#1d4ed8",
+                        textDecoration: "underline",
+                        wordBreak: "break-all",
+                      }}
+                    >
+                      📎 {att.fileName || att.storageKey}
+                    </a>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
-      )
-    );
+      );
+    });
   };
 
   const renderAttachedFilesInline = () => {
@@ -153,9 +306,70 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
     );
   };
 
+  const renderConfirmModal = () => {
+    if (!confirmTarget) return null;
+    return (
+      <div
+        style={{
+          position: "fixed",
+          inset: 0,
+          background: "rgba(0,0,0,0.4)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          zIndex: 2000,
+        }}
+      >
+        <div
+          style={{
+            background: "#fff",
+            borderRadius: 12,
+            padding: 16,
+            width: 280,
+            boxShadow: "0 10px 30px rgba(0,0,0,0.2)",
+          }}
+        >
+          <div style={{ fontWeight: 700, marginBottom: 8 }}>삭제하시겠습니까?</div>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+            <button
+              type="button"
+              onClick={() => setConfirmTarget(null)}
+              style={{
+                padding: "6px 10px",
+                borderRadius: 8,
+                border: "1px solid #e5e7eb",
+                background: "#fff",
+                cursor: "pointer",
+              }}
+            >
+              취소
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                hideMessage(confirmTarget);
+                setConfirmTarget(null);
+              }}
+              style={{
+                padding: "6px 12px",
+                borderRadius: 8,
+                border: 0,
+                background: "#5b21b6",
+                color: "#fff",
+                cursor: "pointer",
+              }}
+            >
+              삭제
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <main className="iso-main">
-          <div className="iso-main-card">
+      <div className="iso-main-card">
         <div className="iso-main-card-header">
           <h1 className="iso-main-title">ISO/IEC개발 AI 서포터 - 유코나이</h1>
           <p className="iso-main-subtitle">
@@ -277,7 +491,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
                     onChangeInput(lastSentInput);
                   }
                 }
-                if (e.key === "Enter" && !e.shiftKey) {
+                if (e.key === "Enter" && e.ctrlKey) {
                   e.preventDefault();
                   onSubmit();
                 }
@@ -318,12 +532,13 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
           <button
             type="submit"
             className="iso-submit-btn"
-            disabled={loading || !input.trim()}
+            disabled={loading || (!input.trim() && attachedFiles.length === 0)}
           >
-            {loading ? "생성 중..." : "전송"}
+            {loading ? "답변 준비 중...." : "전송"}
           </button>
         </form>
       </div>
+      {renderConfirmModal()}
     </main>
   );
 };

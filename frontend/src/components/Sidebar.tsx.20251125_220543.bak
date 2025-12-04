@@ -1,4 +1,4 @@
-console.log("BUILD_VERSION: 2025-12-04- 최신반영");
+console.log("BUILD_VERSION: 2025-11-25-17:55");
 
 import React, { useState } from "react";
 import { Conversation } from "../types/isoChat";
@@ -17,7 +17,6 @@ interface SidebarProps {
   setEditingConvId: (id: string | null) => void;
   onOpenGuidePanel: () => void;
   onReorderConversations?: (from: number, to: number) => void;
-  isAuthed: boolean;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
@@ -34,7 +33,6 @@ const Sidebar: React.FC<SidebarProps> = ({
   setEditingConvId,
   onOpenGuidePanel,
   onReorderConversations,
-  isAuthed,
 }) => {
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
@@ -137,7 +135,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                 )}
                 <div
                   className="iso-sidebar-conv-title"
-                  onDoubleClick={(e) => {
+                  onClick={(e) => {
                     e.stopPropagation();
                     onEditTitleStart(c);
                   }}
@@ -194,10 +192,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         </div>
         <button
           type="button"
-          onClick={() => {
-            if (!isAuthed) return;
-            onOpenGuidePanel();
-          }}
+          onClick={onOpenGuidePanel}
           style={{
             marginTop: 8,
             width: "100%",
@@ -207,10 +202,8 @@ const Sidebar: React.FC<SidebarProps> = ({
             color: "#e5e7eb",
             fontSize: 12,
             padding: "6px 10px",
-            cursor: isAuthed ? "pointer" : "not-allowed",
-            opacity: isAuthed ? 1 : 0.5,
+            cursor: "pointer",
           }}
-          aria-disabled={!isAuthed}
         >
           지침 / 가이드 관리
         </button>
