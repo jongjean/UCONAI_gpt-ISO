@@ -1,7 +1,8 @@
 // src/components/GuidePanel.tsx
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useId, useRef, useState } from "react";
 import { DragDropContext, Droppable, Draggable, DropResult } from "react-beautiful-dnd";
 import { Guide, GuideFile } from "../types/isoChat";
+import { reorderGlobalGuides, reorderRoomGuides } from "../api/guides";
 import "./GuidePanel.scrollbar.css";
 
 export type GuidePanelProps = {
@@ -21,7 +22,18 @@ export type GuidePanelProps = {
 type Tab = "global" | "conversation";
 
 // 파일 중복 방지를 위한 시그니처
-const fileSignature = (f: File) => `${f.name}-${f.size}-${f.lastModified}`;
+const fileSignature = (f: File) => `${f.name}-${f.size}`;
+
+type GuideDraft = {
+  id: string;
+  scope: Guide["scope"];
+  conversationId?: string;
+  title: string;
+  content: string;
+  updatedAt: string;
+};
+
+const DRAFT_STORAGE_KEY = "guideDrafts";
 
 const formatBytes = (bytes: number) => {
   if (!bytes) return "0 B";
@@ -57,6 +69,7 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
   };
   const [tab, setTab] = useState<Tab>(initialTab);
   const savedTabRef = useRef<Tab | null>(null);
+  const suppressTabPersistenceRef = useRef(false);
   const [editing, setEditing] = useState<Guide | null>(null);
 
   // 패널 위치/크기
@@ -75,9 +88,433 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
   });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
+  const renameInputRef = useRef<HTMLInputElement | null>(null);
+  const skipRenameCommitRef = useRef(false);
+  const suppressEditingPersistRef = useRef(false);
+  const pendingActiveGuideIdRef = useRef<string | null>(null);
+  const restoringActiveGuideRef = useRef(false);
+  const manualSelectionRef = useRef(false);
+  const restorationAttemptedRef = useRef(false);
 
   const [orderedGuides, setOrderedGuides] = useState<Guide[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [pendingDelete, setPendingDelete] = useState<{
+    id: string;
+    scope: Tab;
+    title?: string | null;
+  } | null>(null);
+  const deleteCancelButtonRef = useRef<HTMLButtonElement | null>(null);
+  const deleteConfirmButtonRef = useRef<HTMLButtonElement | null>(null);
+  const deleteDialogLabelId = useId();
+  const [sendStatus, setSendStatus] = useState<"idle" | "sending" | "success" | "error">("idle");
+  const sendStatusTimerRef = useRef<number | null>(null);
+  const draftsRef = useRef<Map<string, GuideDraft>>(new Map());
+  const contentSaveTimerRef = useRef<number | null>(null);
+  const pendingGuideRef = useRef<Guide | null>(null);
+  const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const lastSavedSnapshotRef = useRef<string | null>(null);
+  const lastSavedAtRef = useRef<number>(0);
+
+  const clearSendStatusTimer = useCallback(() => {
+    if (sendStatusTimerRef.current !== null) {
+      window.clearTimeout(sendStatusTimerRef.current);
+      sendStatusTimerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    restorationAttemptedRef.current = false;
+  }, [tab, activeConversationId]);
+
+  const persistDrafts = useCallback(() => {
+    try {
+      const serialized = JSON.stringify(
+        Array.from(draftsRef.current.values())
+      );
+      localStorage.setItem(DRAFT_STORAGE_KEY, serialized);
+    } catch (error) {
+      console.warn("failed to persist guide drafts", error);
+    }
+  }, []);
+
+  const loadDrafts = useCallback(() => {
+    try {
+      const saved = localStorage.getItem(DRAFT_STORAGE_KEY);
+      if (!saved) return;
+      const parsed = JSON.parse(saved);
+      if (!Array.isArray(parsed)) return;
+      const pairs: Array<[string, GuideDraft]> = [];
+      parsed.forEach((raw: any) => {
+        if (!raw || typeof raw.id !== "string") return;
+        const scope: Guide["scope"] = raw.scope === "conversation" ? "conversation" : "global";
+        const entry: GuideDraft = {
+          id: raw.id,
+          scope,
+          conversationId: typeof raw.conversationId === "string" ? raw.conversationId : undefined,
+          title: typeof raw.title === "string" ? raw.title : "",
+          content: typeof raw.content === "string" ? raw.content : "",
+          updatedAt:
+            typeof raw.updatedAt === "string" ? raw.updatedAt : new Date().toISOString(),
+        };
+        pairs.push([entry.id, entry]);
+      });
+      draftsRef.current = new Map(pairs);
+    } catch (error) {
+      draftsRef.current = new Map();
+      console.warn("failed to load guide drafts", error);
+    }
+  }, []);
+
+  const removeDraft = useCallback(
+    (id: string) => {
+      if (!draftsRef.current.has(id)) return;
+      draftsRef.current.delete(id);
+      persistDrafts();
+    },
+    [persistDrafts]
+  );
+
+  const saveDraft = useCallback(
+    (guide: Guide) => {
+      const draft: GuideDraft = {
+        id: guide.id,
+        scope: guide.scope,
+        conversationId: guide.conversationId,
+        title: guide.title ?? "",
+        content: guide.content ?? "",
+        updatedAt: guide.updatedAt ?? new Date().toISOString(),
+      };
+      draftsRef.current.set(guide.id, draft);
+      persistDrafts();
+    },
+    [persistDrafts]
+  );
+
+
+  const applyDraftIfFresher = useCallback((guide: Guide): Guide => {
+    const draft = draftsRef.current.get(guide.id);
+    if (!draft) return guide;
+    if (draft.scope !== guide.scope) return guide;
+
+    const base: Guide =
+      draft.scope === "conversation" && draft.conversationId && !guide.conversationId
+        ? { ...guide, conversationId: draft.conversationId }
+        : guide;
+
+    const draftTs = new Date(draft.updatedAt).getTime();
+    const guideTs = new Date(base.updatedAt || draft.updatedAt).getTime();
+    if (
+      draftTs > guideTs ||
+      (!base.content && draft.content) ||
+      (!base.title && draft.title)
+    ) {
+      return {
+        ...base,
+        title: draft.title || base.title,
+        content: draft.content || base.content,
+        updatedAt: draft.updatedAt,
+      };
+    }
+    return base;
+  }, []);
+
+  const scheduleSendStatusReset = useCallback(() => {
+    clearSendStatusTimer();
+    sendStatusTimerRef.current = window.setTimeout(() => {
+      setSendStatus("idle");
+      sendStatusTimerRef.current = null;
+    }, 2400);
+  }, [clearSendStatusTimer]);
+
+  useEffect(() => {
+    if (pendingDelete) {
+      deleteCancelButtonRef.current?.focus();
+    }
+  }, [pendingDelete]);
+
+  useEffect(() => {
+    loadDrafts();
+    setOrderedGuides((prev) => prev.map((guide) => applyDraftIfFresher(guide)));
+    setEditing((prev) => (prev ? applyDraftIfFresher(prev) : prev));
+  }, [loadDrafts, applyDraftIfFresher]);
+
+  useEffect(() => {
+    return () => {
+      clearSendStatusTimer();
+    };
+  }, [clearSendStatusTimer]);
+
+  useEffect(() => {
+    return () => {
+      if (contentSaveTimerRef.current !== null) {
+        window.clearTimeout(contentSaveTimerRef.current);
+        contentSaveTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  const normalizeGuideForSave = useCallback(
+    (guide: Guide | null | undefined): Guide | null => {
+      if (!guide) return null;
+      if (guide.scope === "conversation") {
+        const convId = guide.conversationId || activeConversationId;
+        if (!convId) {
+          console.warn("guide save blocked – missing conversationId", guide.id);
+          return null;
+        }
+        return { ...guide, conversationId: convId };
+      }
+      return { ...guide };
+    },
+    [activeConversationId]
+  );
+
+  const serializeGuideSnapshot = useCallback((guide: Guide): string => {
+    const files = (guide.files || []).map((f) => ({
+      id: f.id,
+      fileName: f.fileName,
+      fileSize: f.fileSize,
+      mimeType: f.mimeType,
+      storageKey: f.storageKey,
+      downloadUrl: f.downloadUrl,
+      createdAt: f.createdAt,
+    }));
+    return JSON.stringify({
+      id: guide.id,
+      scope: guide.scope,
+      conversationId: guide.conversationId,
+      title: guide.title,
+      content: guide.content,
+      files,
+    });
+  }, []);
+
+  const performGuideSave = useCallback(
+    async (guide: Guide) => {
+      try {
+        const result = await Promise.resolve(onUpdateGuide(guide));
+        const applied = result ?? guide;
+        setEditing((prev) => (prev && prev.id === applied.id ? applied : prev));
+        setOrderedGuides((prev) =>
+          prev.map((g) =>
+            g.id === applied.id
+              ? {
+                  ...g,
+                  title: applied.title,
+                  content: applied.content,
+                  updatedAt: applied.updatedAt,
+                }
+              : g
+          )
+        );
+        saveDraft(applied);
+        lastSavedSnapshotRef.current = serializeGuideSnapshot(applied);
+        return { ok: true as const, guide: applied };
+      } catch (error) {
+        console.error("guide auto-save failed", error);
+        return { ok: false as const, error };
+      }
+    },
+    [onUpdateGuide, saveDraft, serializeGuideSnapshot]
+  );
+
+  const flushPendingGuide = useCallback(
+    async (overrideGuide?: Guide) => {
+      const candidate = overrideGuide ?? pendingGuideRef.current ?? editing;
+      const normalized = normalizeGuideForSave(candidate);
+      if (!normalized) {
+        return { ok: false as const, error: new Error("missing conversationId") };
+      }
+      const snapshot = serializeGuideSnapshot(normalized);
+      const now = Date.now();
+      if (lastSavedSnapshotRef.current && lastSavedSnapshotRef.current === snapshot) {
+        pendingGuideRef.current = null;
+        return { ok: true as const, guide: normalized };
+      }
+      if (now - lastSavedAtRef.current < 2000) {
+        pendingGuideRef.current = null;
+        return { ok: true as const, guide: normalized };
+      }
+      pendingGuideRef.current = null;
+
+      return new Promise<{ ok: true; guide: Guide } | { ok: false; error: unknown }>((resolve) => {
+        saveQueueRef.current = saveQueueRef.current
+          .catch(() => {
+            /* ignored: previous error already handled */
+          })
+          .then(async () => {
+            const outcome = await performGuideSave(normalized);
+            if (outcome.ok) {
+              lastSavedAtRef.current = Date.now();
+            }
+            resolve(outcome);
+          });
+      });
+    },
+    [editing, normalizeGuideForSave, performGuideSave, serializeGuideSnapshot]
+  );
+
+  const scheduleGuideSave = useCallback(
+    (guide: Guide) => {
+      pendingGuideRef.current = guide;
+      if (contentSaveTimerRef.current !== null) {
+        window.clearTimeout(contentSaveTimerRef.current);
+      }
+      contentSaveTimerRef.current = window.setTimeout(() => {
+        contentSaveTimerRef.current = null;
+        void flushPendingGuide();
+      }, 2000);
+    },
+    [flushPendingGuide]
+  );
+
+  useEffect(() => {
+    if (!isOpen) {
+      clearSendStatusTimer();
+      void flushPendingGuide();
+    }
+  }, [isOpen, flushPendingGuide]);
+
+
+  useEffect(() => {
+    clearSendStatusTimer();
+    setSendStatus("idle");
+  }, [editing?.id, clearSendStatusTimer]);
+
+  const requestDeleteGuide = (id: string, scope: Tab, title?: string | null) => {
+    setPendingDelete({ id, scope, title: title ?? null });
+  };
+
+  const clearDeleteDialog = () => setPendingDelete(null);
+
+  const confirmDeleteGuide = async () => {
+    if (!pendingDelete) return;
+    try {
+      await Promise.resolve(onDeleteGuide(pendingDelete.id, pendingDelete.scope));
+      removeDraft(pendingDelete.id);
+    } finally {
+      setPendingDelete(null);
+    }
+  };
+
+  const handleDeleteConfirmKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      confirmDeleteGuide();
+    }
+  };
+
+  const handleDeleteCancelKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      clearDeleteDialog();
+    }
+  };
+
+  const renderDeleteConfirm = () => {
+    if (!pendingDelete) return null;
+
+    const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+      if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+        event.preventDefault();
+        const cancelBtn = deleteCancelButtonRef.current;
+        const confirmBtn = deleteConfirmButtonRef.current;
+        if (!cancelBtn || !confirmBtn) return;
+        const active = document.activeElement;
+        if (active === cancelBtn) {
+          confirmBtn.focus();
+        } else if (active === confirmBtn) {
+          cancelBtn.focus();
+        } else {
+          (event.key === "ArrowRight" ? confirmBtn : cancelBtn).focus();
+        }
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        clearDeleteDialog();
+        return;
+      }
+      if (event.key === "Enter" && event.target === event.currentTarget) {
+        event.preventDefault();
+        confirmDeleteGuide();
+      }
+    };
+
+    return (
+      <div
+        style={{
+          position: "fixed",
+          inset: 0,
+          background: "rgba(0,0,0,0.4)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          zIndex: 4000,
+        }}
+      >
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={deleteDialogLabelId}
+          tabIndex={-1}
+          onKeyDown={handleKeyDown}
+          style={{
+            background: "#fff",
+            borderRadius: 12,
+            padding: 18,
+            width: 300,
+            boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
+            outline: "none",
+          }}
+        >
+          <div
+            id={deleteDialogLabelId}
+            style={{ fontWeight: 700, marginBottom: 10 }}
+          >
+            {pendingDelete.title
+              ? `"${pendingDelete.title}" 지침을 삭제할까요?`
+              : "지침을 삭제하시겠습니까?"}
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+            <button
+              type="button"
+              ref={deleteCancelButtonRef}
+              onClick={clearDeleteDialog}
+              onKeyDown={handleDeleteCancelKeyDown}
+              style={{
+                padding: "6px 10px",
+                borderRadius: 8,
+                border: "1px solid #e5e7eb",
+                background: "#fff",
+                cursor: "pointer",
+              }}
+            >
+              취소
+            </button>
+            <button
+              type="button"
+              ref={deleteConfirmButtonRef}
+              onClick={confirmDeleteGuide}
+              onKeyDown={handleDeleteConfirmKeyDown}
+              style={{
+                padding: "6px 12px",
+                borderRadius: 8,
+                border: 0,
+                background: "#b91c1c",
+                color: "#fff",
+                cursor: "pointer",
+              }}
+            >
+              삭제
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
   // 탭 유지: 마지막 선택 탭을 localStorage에 저장/복원
   useEffect(() => {
     const savedTab = localStorage.getItem("guidePanelTab");
@@ -90,6 +527,10 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
   }, []);
 
   useEffect(() => {
+    if (suppressTabPersistenceRef.current) {
+      suppressTabPersistenceRef.current = false;
+      return;
+    }
     localStorage.setItem("guidePanelTab", tab);
     savedTabRef.current = tab;
   }, [tab]);
@@ -101,16 +542,34 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
     const savedIsConversation = savedTabVal === "conversation";
     if (!activeConversationId) {
       if (tab === "conversation") {
+        if (contentSaveTimerRef.current !== null) {
+          window.clearTimeout(contentSaveTimerRef.current);
+          contentSaveTimerRef.current = null;
+        }
+        void flushPendingGuide();
+        suppressTabPersistenceRef.current = true;
         setTab("global");
       }
       return;
     }
     if (savedIsConversation) {
-      setTab("conversation");
+      if (tab !== "conversation") {
+        if (contentSaveTimerRef.current !== null) {
+          window.clearTimeout(contentSaveTimerRef.current);
+          contentSaveTimerRef.current = null;
+        }
+        void flushPendingGuide();
+        setTab("conversation");
+      }
     } else if (tab === "conversation" && !savedIsConversation) {
+      if (contentSaveTimerRef.current !== null) {
+        window.clearTimeout(contentSaveTimerRef.current);
+        contentSaveTimerRef.current = null;
+      }
+      void flushPendingGuide();
       setTab("global");
     }
-  }, [activeConversationId, tab]);
+  }, [activeConversationId, tab, flushPendingGuide]);
     // 체크박스 선택 토글
     const toggleSelect = (id: string) => {
       setSelectedIds((prev) =>
@@ -189,8 +648,179 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
 
   // currentList가 바뀌면 orderedGuides도 동기화
   useEffect(() => {
-    setOrderedGuides(currentList);
-  }, [currentList]);
+    const hydrated = currentList.map((guide) => applyDraftIfFresher(guide));
+    setOrderedGuides(hydrated);
+  }, [currentList, applyDraftIfFresher]);
+
+  const getActiveEditingKey = useCallback(() => {
+    if (tab === "global") {
+      return "guidePanelActiveGlobal";
+    }
+    if (!activeConversationId) return null;
+    return `guidePanelActiveConversation:${activeConversationId}`;
+  }, [tab, activeConversationId]);
+
+  useEffect(() => {
+    if (manualSelectionRef.current) {
+      restorationAttemptedRef.current = true;
+      return;
+    }
+
+    if (currentList.length === 0) {
+      restorationAttemptedRef.current = false;
+      return;
+    }
+
+    const key = getActiveEditingKey();
+    if (!key) {
+      pendingActiveGuideIdRef.current = null;
+      restorationAttemptedRef.current = true;
+      return;
+    }
+
+    try {
+      const saved = localStorage.getItem(key);
+      if (!saved) {
+        pendingActiveGuideIdRef.current = null;
+        restorationAttemptedRef.current = true;
+        return;
+      }
+      const parsed = JSON.parse(saved);
+      if (!parsed || typeof parsed !== "object") {
+        pendingActiveGuideIdRef.current = null;
+        restorationAttemptedRef.current = true;
+        return;
+      }
+      const { guideId } = parsed as { guideId?: string | null };
+      if (!guideId) {
+        pendingActiveGuideIdRef.current = null;
+        restorationAttemptedRef.current = true;
+        return;
+      }
+
+      if (editing?.id === guideId) {
+        pendingActiveGuideIdRef.current = null;
+        restorationAttemptedRef.current = true;
+        return;
+      }
+
+      pendingActiveGuideIdRef.current = guideId;
+      const sourceList = tab === "global" ? globalGuides : conversationGuides;
+      const target = sourceList.find((g) => g.id === guideId) || currentList.find((g) => g.id === guideId);
+      if (target) {
+        suppressEditingPersistRef.current = true;
+        const hydrated = applyDraftIfFresher({ ...target });
+        const normalized =
+          hydrated.scope === "conversation" && !hydrated.conversationId && activeConversationId
+            ? { ...hydrated, conversationId: activeConversationId }
+            : hydrated;
+        manualSelectionRef.current = false;
+        restoringActiveGuideRef.current = true;
+        setEditing(normalized);
+        pendingActiveGuideIdRef.current = null;
+        restorationAttemptedRef.current = true;
+        return;
+      }
+      pendingActiveGuideIdRef.current = null;
+    } catch (error) {
+      console.warn("failed to restore active guide", error);
+      pendingActiveGuideIdRef.current = null;
+    }
+
+    restorationAttemptedRef.current = true;
+  }, [tab, activeConversationId, getActiveEditingKey, currentList, applyDraftIfFresher, globalGuides, conversationGuides, editing?.id]);
+
+  useEffect(() => {
+    if (suppressEditingPersistRef.current) {
+      suppressEditingPersistRef.current = false;
+      return;
+    }
+    if (!restorationAttemptedRef.current) {
+      return;
+    }
+    if (pendingActiveGuideIdRef.current || restoringActiveGuideRef.current) {
+      return;
+    }
+    const key = getActiveEditingKey();
+    if (!key) return;
+    try {
+      if (!editing) {
+        localStorage.removeItem(key);
+        return;
+      }
+      localStorage.setItem(
+        key,
+        JSON.stringify({ guideId: editing.id, scope: editing.scope, updatedAt: editing.updatedAt })
+      );
+      manualSelectionRef.current = false;
+    } catch (error) {
+      console.warn("failed to persist active guide", error);
+    }
+  }, [editing, getActiveEditingKey]);
+
+  useEffect(() => {
+    const pendingId = pendingActiveGuideIdRef.current;
+    if (!pendingId) return;
+    const target = orderedGuides.find((g) => g.id === pendingId);
+    if (!target) return;
+    suppressEditingPersistRef.current = true;
+    const hydrated = applyDraftIfFresher({ ...target });
+    const normalized =
+      hydrated.scope === "conversation" && !hydrated.conversationId && activeConversationId
+        ? { ...hydrated, conversationId: activeConversationId }
+        : hydrated;
+    restoringActiveGuideRef.current = true;
+    setEditing(normalized);
+    pendingActiveGuideIdRef.current = null;
+  }, [orderedGuides, activeConversationId, applyDraftIfFresher]);
+
+  useEffect(() => {
+    if (editing && editing.id && !lastSavedSnapshotRef.current) {
+      lastSavedSnapshotRef.current = serializeGuideSnapshot(editing);
+    }
+  }, [editing, serializeGuideSnapshot]);
+
+  useEffect(() => {
+    if (!restoringActiveGuideRef.current) return;
+    restoringActiveGuideRef.current = false;
+  }, [editing?.id]);
+
+  useEffect(() => {
+    if (renamingId) {
+      requestAnimationFrame(() => {
+        renameInputRef.current?.focus();
+        renameInputRef.current?.select();
+      });
+    } else {
+      renameInputRef.current = null;
+    }
+  }, [renamingId]);
+
+  const persistGuideOrder = useCallback(
+    async (guides: Guide[]) => {
+      const guideIds = guides.map((guide) => guide.id);
+      try {
+        if (tab === "global") {
+          await reorderGlobalGuides(guideIds);
+          onReloadGlobalGuides?.();
+          return;
+        }
+        if (!activeConversationId) {
+          return;
+        }
+        await reorderRoomGuides(activeConversationId, guideIds);
+        onReloadRoomGuides?.(activeConversationId);
+      } catch (error) {
+        console.error("failed to persist guide order", error);
+        if (tab === "global") {
+          onReloadGlobalGuides?.();
+        } else if (activeConversationId) {
+          onReloadRoomGuides?.(activeConversationId);
+        }
+      }
+    },
+    [tab, activeConversationId, onReloadGlobalGuides, onReloadRoomGuides]
+  );
 
   // 드래그 앤 드롭 완료 시 순서 반영
   const onDragEnd = (result: DropResult) => {
@@ -198,7 +828,127 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
     if (result.source.index === result.destination.index) return;
     const newOrder = reorder(orderedGuides, result.source.index, result.destination.index);
     setOrderedGuides(newOrder);
-    // TODO: 외부로 순서 반영 필요시 콜백 호출 (예: onReorderGuides)
+    void persistGuideOrder(newOrder);
+  };
+
+  const beginRename = (guide: Guide) => {
+    setRenamingId(guide.id);
+    setRenameDraft(guide.title || "");
+    skipRenameCommitRef.current = false;
+  };
+
+  const clearRenameState = () => {
+    setRenamingId(null);
+    setRenameDraft("");
+  };
+
+  const handleSelectGuideItem = (guide: Guide, startRename = false) => {
+    if (editing && editing.id !== guide.id) {
+      void flushPendingGuide(editing);
+    }
+    const hydrated = applyDraftIfFresher({ ...guide });
+    const normalized =
+      hydrated.scope === "conversation" && !hydrated.conversationId && activeConversationId
+        ? { ...hydrated, conversationId: activeConversationId }
+        : hydrated;
+    manualSelectionRef.current = true;
+    const key = getActiveEditingKey();
+    if (key) {
+      try {
+        localStorage.setItem(
+          key,
+          JSON.stringify({ guideId: normalized.id, scope: normalized.scope, updatedAt: normalized.updatedAt })
+        );
+      } catch (error) {
+        console.warn("failed to persist active guide from selection", error);
+      }
+    }
+    setEditing(normalized);
+    if (startRename) {
+      beginRename(guide);
+    } else {
+      clearRenameState();
+      skipRenameCommitRef.current = false;
+    }
+  };
+
+  const finishRename = (shouldSave: boolean): boolean => {
+    if (!renamingId) return false;
+    const target =
+      orderedGuides.find((g) => g.id === renamingId) ||
+      (editing && editing.id === renamingId ? editing : null);
+    const nextTitle = renameDraft.trim();
+    const originalTitle = target?.title || "";
+    clearRenameState();
+    const shouldCommit = shouldSave && !!target && nextTitle !== originalTitle;
+    skipRenameCommitRef.current = false;
+    if (!shouldCommit || !target) return false;
+    handleChangeTitle(nextTitle, target);
+    return true;
+  };
+
+  const handleRenameKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      finishRename(true);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      skipRenameCommitRef.current = true;
+      clearRenameState();
+    }
+  };
+
+  const handleRenameBlur = () => {
+    if (skipRenameCommitRef.current) {
+      skipRenameCommitRef.current = false;
+      return;
+    }
+    finishRename(true);
+  };
+
+
+  const handleSendGuide = useCallback(async () => {
+    if (!editing) return;
+    clearSendStatusTimer();
+    setSendStatus("sending");
+    if (contentSaveTimerRef.current !== null) {
+      window.clearTimeout(contentSaveTimerRef.current);
+      contentSaveTimerRef.current = null;
+    }
+    if (renamingId) {
+      const renamed = finishRename(true);
+      if (renamed) {
+        setSendStatus("success");
+        scheduleSendStatusReset();
+        return;
+      }
+    }
+    const result = await flushPendingGuide(editing);
+    if (result.ok) {
+      setSendStatus("success");
+    } else {
+      setSendStatus("error");
+    }
+    scheduleSendStatusReset();
+  }, [editing, renamingId, clearSendStatusTimer, finishRename, flushPendingGuide, scheduleSendStatusReset]);
+
+  const handleClosePanel = () => {
+    if (contentSaveTimerRef.current !== null) {
+      window.clearTimeout(contentSaveTimerRef.current);
+      contentSaveTimerRef.current = null;
+    }
+    void flushPendingGuide();
+    onClose();
+  };
+
+  const handleTabClick = (next: Tab) => {
+    if (next === tab) return;
+    if (contentSaveTimerRef.current !== null) {
+      window.clearTimeout(contentSaveTimerRef.current);
+      contentSaveTimerRef.current = null;
+    }
+    void flushPendingGuide();
+    setTab(next);
   };
 
   /* ------------------------------------------------
@@ -207,12 +957,18 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
   useEffect(() => {
     if (!isOpen) {
       setEditing(null);
+      clearRenameState();
       return;
     }
 
-    const list = currentList;
+    if (!restorationAttemptedRef.current || pendingActiveGuideIdRef.current || restoringActiveGuideRef.current) {
+      return;
+    }
+
+    const list = orderedGuides;
     if (list.length === 0) {
       setEditing(null);
+      clearRenameState();
       return;
     }
 
@@ -225,19 +981,36 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
       )[0];
 
     if (newestBlank && (!editing || editing.id !== newestBlank.id)) {
-      setEditing(newestBlank);
+      const hydrated = applyDraftIfFresher({ ...newestBlank });
+      const normalized =
+        hydrated.scope === "conversation" && !hydrated.conversationId && activeConversationId
+          ? { ...hydrated, conversationId: activeConversationId }
+          : hydrated;
+      manualSelectionRef.current = false;
+      setEditing(normalized);
+      beginRename(newestBlank);
       return;
     }
 
     // 2순위: 기존 editing 이 아직 목록에 있다면 그대로 유지
     if (editing && list.some((g) => g.id === editing.id)) {
+      if (renamingId && !list.some((g) => g.id === renamingId)) {
+        clearRenameState();
+      }
       return;
     }
 
     // 3순위: 없으면 첫 번째 항목 선택
-    setEditing(list[0]);
+    const hydrated = applyDraftIfFresher({ ...list[0] });
+    const normalized =
+      hydrated.scope === "conversation" && !hydrated.conversationId && activeConversationId
+        ? { ...hydrated, conversationId: activeConversationId }
+        : hydrated;
+    manualSelectionRef.current = false;
+    setEditing(normalized);
+    clearRenameState();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, tab, globalGuides, conversationGuides, activeConversationId]);
+  }, [isOpen, tab, orderedGuides, activeConversationId]);
 
   /* ------------------------------------------------
    * 2. 패널 드래그 / 리사이즈
@@ -318,9 +1091,7 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
     if (!files.length) return;
 
     const existing = new Set(
-      (editing.files || []).map(
-        (f: GuideFile) => `${f.fileName}-${f.fileSize}-${f.createdAt ?? ""}`
-      )
+      (editing.files || []).map((f: GuideFile) => `${f.fileName}-${f.fileSize ?? ""}`)
     );
 
     const filtered = files.filter(
@@ -337,6 +1108,7 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
       storageKey: "",
       downloadUrl: "",
       createdAt: now,
+      file: f,
     }));
 
     const updated: Guide = {
@@ -346,7 +1118,8 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
     };
 
     setEditing(updated);
-    onUpdateGuide(updated);
+    saveDraft(updated);
+    scheduleGuideSave(updated);
   };
 
   // 패널 열려 있는 동안 전역 Ctrl+V 지원
@@ -380,15 +1153,22 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
   /* ------------------------------------------------
    * 4. 제목/내용 변경
    * ------------------------------------------------ */
-  const handleChangeTitle = (value: string) => {
-    if (!editing) return;
+  const handleChangeTitle = (value: string, guideOverride?: Guide) => {
+    const base = guideOverride ?? editing;
+    if (!base) return;
     const updated: Guide = {
-      ...editing,
+      ...base,
       title: value,
       updatedAt: new Date().toISOString(),
     };
-    setEditing(updated);
-    onUpdateGuide(updated);
+    setEditing((prev) => (prev && prev.id === updated.id ? updated : prev));
+    setOrderedGuides((prev) =>
+      prev.map((g) =>
+        g.id === updated.id ? { ...g, title: updated.title, updatedAt: updated.updatedAt } : g
+      )
+    );
+    saveDraft(updated);
+    scheduleGuideSave(updated);
   };
 
   const handleChangeContent = (value: string) => {
@@ -399,16 +1179,31 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
       updatedAt: new Date().toISOString(),
     };
     setEditing(updated);
-    onUpdateGuide(updated);
+    setOrderedGuides((prev) =>
+      prev.map((g) =>
+        g.id === updated.id
+          ? {
+              ...g,
+              content: updated.content,
+              updatedAt: updated.updatedAt,
+            }
+          : g
+      )
+    );
+    saveDraft(updated);
+    scheduleGuideSave(updated);
   };
 
   if (!isOpen) return null;
+
+  const isEditingActive = Boolean(editing);
 
   /* ------------------------------------------------
    * 5. 렌더링
    * ------------------------------------------------ */
   return (
     <>
+      {renderDeleteConfirm()}
       {/* 어두운 배경 – 드래그/리사이즈 중에는 닫히지 않게 */}
       <div
         style={{
@@ -483,27 +1278,69 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={onClose}
-            style={{
-              border: 0,
-              borderRadius: "999px",
-              width: 28,
-              height: 28,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              background: "#111827",
-              color: "#e5e7eb",
-              cursor: "pointer",
-              fontWeight: 700,
-              fontSize: 16,
-            }}
-            aria-label="닫기"
-          >
-            ×
-          </button>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <button
+              type="button"
+              onClick={() => {
+                void handleSendGuide();
+              }}
+              disabled={!isEditingActive}
+              style={{
+                borderRadius: 999,
+                border: "1px solid #7c3aed",
+                background: isEditingActive ? "#7c3aed" : "#4c1d95",
+                color: "#fff",
+                padding: "6px 16px",
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: isEditingActive ? "pointer" : "not-allowed",
+                opacity: isEditingActive ? 1 : 0.6,
+              }}
+              aria-label="지침 전송"
+            >
+              전송
+            </button>
+            {sendStatus !== "idle" && (
+              <span
+                style={{
+                  fontSize: 11,
+                  color:
+                    sendStatus === "success"
+                      ? "#c4b5fd"
+                      : sendStatus === "error"
+                      ? "#fca5a5"
+                      : "#d1d5db",
+                }}
+              >
+                {sendStatus === "sending"
+                  ? "전송 중..."
+                  : sendStatus === "success"
+                  ? "전송 완료"
+                  : "전송 실패"}
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={handleClosePanel}
+              style={{
+                border: 0,
+                borderRadius: "999px",
+                width: 28,
+                height: 28,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                background: "#111827",
+                color: "#e5e7eb",
+                cursor: "pointer",
+                fontWeight: 700,
+                fontSize: 16,
+              }}
+              aria-label="닫기"
+            >
+              ×
+            </button>
+          </div>
         </div>
 
         {/* 탭 */}
@@ -516,7 +1353,7 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
         >
           <button
             type="button"
-            onClick={() => setTab("global")}
+            onClick={() => handleTabClick("global")}
             style={{
               flex: 1,
               borderRadius: 999,
@@ -532,7 +1369,7 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
           </button>
           <button
             type="button"
-            onClick={() => setTab("conversation")}
+            onClick={() => handleTabClick("conversation")}
             disabled={!activeConversationId}
             style={{
               flex: 1,
@@ -670,6 +1507,11 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
                                   transition: "background 0.15s",
                                   ...provided.draggableProps.style,
                                 }}
+                                onClick={() => handleSelectGuideItem(g)}
+                                onDoubleClick={(event) => {
+                                  event.preventDefault();
+                                  handleSelectGuideItem(g, true);
+                                }}
                               >
                                 <input
                                   type="checkbox"
@@ -678,22 +1520,45 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
                                   style={{ marginRight: 6 }}
                                   onClick={e => e.stopPropagation()}
                                 />
-                                <span
-                                  style={{
-                                    overflow: "hidden",
-                                    textOverflow: "ellipsis",
-                                    whiteSpace: "nowrap",
-                                    flex: 1,
-                                  }}
-                                  onClick={() => setEditing(g)}
-                                >
-                                  {g.title || "(제목 없음)"}
-                                </span>
+                                {renamingId === g.id ? (
+                                  <input
+                                    ref={(el) => {
+                                      if (renamingId === g.id) {
+                                        renameInputRef.current = el;
+                                      }
+                                    }}
+                                    value={renameDraft}
+                                    onChange={(e) => setRenameDraft(e.target.value)}
+                                    onKeyDown={handleRenameKeyDown}
+                                    onBlur={handleRenameBlur}
+                                    onClick={(e) => e.stopPropagation()}
+                                    style={{
+                                      flex: 1,
+                                      padding: "2px 4px",
+                                      borderRadius: 6,
+                                      border: "1px solid #4c1d95",
+                                      background: "#1e1b4b",
+                                      color: "#f9fafb",
+                                      fontSize: 13,
+                                    }}
+                                  />
+                                ) : (
+                                  <span
+                                    style={{
+                                      overflow: "hidden",
+                                      textOverflow: "ellipsis",
+                                      whiteSpace: "nowrap",
+                                      flex: 1,
+                                    }}
+                                  >
+                                    {g.title || "(제목 없음)"}
+                                  </span>
+                                )}
                                 <button
                                   type="button"
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    onDeleteGuide(g.id, tab);
+                                    requestDeleteGuide(g.id, tab, g.title);
                                   }}
                                   style={{
                                     marginLeft: 4,
@@ -750,21 +1615,6 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
                   overflow: "auto",
                 }}
               >
-                <input
-                  value={editing.title}
-                  onChange={(e) => handleChangeTitle(e.target.value)}
-                  placeholder="지침 제목"
-                  style={{
-                    width: "100%",
-                    marginBottom: 8,
-                    borderRadius: 8,
-                    border: "1px solid #1f2937",
-                    padding: 8,
-                    fontSize: 13,
-                    background: "#020617",
-                    color: "#f9fafb",
-                  }}
-                />
                 <div
                   style={{
                     display: "flex",

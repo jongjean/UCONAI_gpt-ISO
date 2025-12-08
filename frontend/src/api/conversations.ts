@@ -44,3 +44,9 @@ export async function updateConversation(
 export async function deleteConversation(id: string): Promise<void> {
   await apiClient.delete(`/ucon/iso/conversations/${id}`);
 }
+
+export async function reorderConversations(orderedIds: string[]): Promise<void> {
+  await apiClient.post(`/ucon/iso/conversations/reorder`, {
+    orderedIds,
+  });
+}

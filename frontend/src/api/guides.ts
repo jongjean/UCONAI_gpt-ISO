@@ -81,3 +81,11 @@ export async function deleteGuide(
   }
   await apiClient.delete(`/ucon/iso/guides/room/${conversationId}/${id}`);
 }
+
+export async function reorderGlobalGuides(guideIds: string[]) {
+  await apiClient.post("/ucon/iso/guides/global/reorder", { orderedIds: guideIds });
+}
+
+export async function reorderRoomGuides(conversationId: string, guideIds: string[]) {
+  await apiClient.post(`/ucon/iso/guides/room/${conversationId}/reorder`, { orderedIds: guideIds });
+}

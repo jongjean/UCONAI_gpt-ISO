@@ -1,6 +1,13 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import "./App.css";
 import { authLogin, authRegister, AuthTokens, AuthUser } from "./api/auth";
+import {
+  fetchPendingUsers,
+  approveUser as apiApproveUser,
+  rejectUser as apiRejectUser,
+  deleteUser as apiDeleteUser,
+  PendingUser,
+} from "./api/admin";
 
 import { fetchModels, requestIsoChat } from "./api/isoChatApi";
 
@@ -8,7 +15,7 @@ import {
   ModelOption,
   RunMode,
   AnswerMode,
-  Message,
+  // Message,
   Conversation,
   Guide,
   AttachedFile,
@@ -31,6 +38,7 @@ import {
   createConversation,
   updateConversation,
   deleteConversation as apiDeleteConversation,
+  reorderConversations as apiReorderConversations,
 } from "./api/conversations";
 import { fetchMessages, createMessage } from "./api/messages";
 import {
@@ -48,6 +56,69 @@ const MODEL_DESCRIPTIONS: Record<string, string> = {
   "gpt-4.1": "정확도·근거 중심",
   "gpt-4.1-mini": "빠른 응답",
   "gpt-4.1-adv": "장문 병합·요약",
+};
+
+const normalizeGuideScope = (scope: string | null | undefined): "global" | "conversation" => {
+  if (typeof scope !== "string") return "global";
+  return scope.toLowerCase() === "conversation" ? "conversation" : "global";
+};
+
+const sortGuideFilesAsc = (files: GuideFile[]): GuideFile[] => {
+  const toTimestamp = (value?: string) => {
+    if (!value) return Number.POSITIVE_INFINITY;
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? Number.POSITIVE_INFINITY : parsed;
+  };
+  return [...files].sort((a, b) => {
+    const diff = toTimestamp(a.createdAt) - toTimestamp(b.createdAt);
+    if (diff !== 0) return diff;
+    return (a.fileName || "").localeCompare(b.fileName || "");
+  });
+};
+
+const normalizeGuideFile = (file: any): GuideFile => {
+  if (!file) {
+    return {
+      id: `gf-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      fileName: "",
+      fileSize: null,
+      storageKey: undefined,
+      mimeType: undefined,
+      downloadUrl: undefined,
+    };
+  }
+  return {
+    id: file.id ?? `gf-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    fileName: file.fileName ?? "",
+    fileSize:
+      typeof file.fileSize === "number"
+        ? file.fileSize
+        : file.fileSize != null
+          ? Number(file.fileSize)
+          : null,
+    mimeType: file.mimeType ?? undefined,
+    storageKey: file.storageKey ?? undefined,
+    downloadUrl: file.downloadUrl ?? file.url ?? undefined,
+    createdAt: file.createdAt ?? file.created_at ?? undefined,
+  };
+};
+
+const normalizeGuide = (guide: any): Guide => {
+  const normalizedScope = normalizeGuideScope(guide?.scope);
+  const files = Array.isArray(guide?.files)
+    ? guide.files.map((file: any) => normalizeGuideFile(file))
+    : [];
+
+  return {
+    ...guide,
+    scope: normalizedScope,
+    conversationId: guide?.conversationId ?? undefined,
+    title: guide?.title ?? "",
+    content: guide?.content ?? "",
+    files,
+    createdAt: guide?.createdAt ?? new Date().toISOString(),
+    updatedAt: guide?.updatedAt ?? guide?.createdAt ?? new Date().toISOString(),
+  };
 };
 
 const App: React.FC = () => {
@@ -90,6 +161,7 @@ const App: React.FC = () => {
 
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
 
+
   // 인증 상태
   const [authUser, setAuthUser] = useState<AuthUser | null>(() => {
     const saved = localStorage.getItem("authUser");
@@ -99,6 +171,12 @@ const App: React.FC = () => {
     const saved = localStorage.getItem("authTokens");
     return saved ? JSON.parse(saved) : null;
   });
+  const [pendingUsers, setPendingUsers] = useState<PendingUser[]>([]);
+  const [pendingLoading, setPendingLoading] = useState(false);
+  const [pendingError, setPendingError] = useState<string | null>(null);
+  const [pendingActionIds, setPendingActionIds] = useState<string[]>([]);
+  const [pendingUiState, setPendingUiState] = useState<Record<string, "default" | "approved" | "hold">>({});
+  const isSuperAdmin = authUser?.role === "SUPER_ADMIN";
 
   // 인증 정보 로컬 저장
   useEffect(() => {
@@ -119,10 +197,150 @@ const App: React.FC = () => {
     if (authTokens?.access) {
       apiClient.defaults.headers.common["Authorization"] =
         `Bearer ${authTokens.access}`;
+      try {
+        const payload = JSON.parse(atob(authTokens.access.split(".")[1] || ""));
+        setAuthUser((prev) => ({
+          id: payload.uid || prev?.id || "",
+          email: payload.email || prev?.email || "",
+          role: payload.role || prev?.role,
+          status: prev?.status,
+          totpEnabled: prev?.totpEnabled,
+        }));
+      } catch (decodeError) {
+        console.warn("Unable to decode access token", decodeError);
+      }
     } else {
       delete apiClient.defaults.headers.common["Authorization"];
     }
   }, [authTokens]);
+
+  const loadPendingUsers = useCallback(async () => {
+    if (!authTokens?.access || !isSuperAdmin) {
+      setPendingUsers([]);
+      setPendingUiState({});
+      return;
+    }
+    setPendingLoading(true);
+    setPendingError(null);
+    try {
+      const list = await fetchPendingUsers(authTokens.access);
+      const sorted = [...list].sort((a, b) => {
+        const aSuper = a.role === "SUPER_ADMIN";
+        const bSuper = b.role === "SUPER_ADMIN";
+        if (aSuper && !bSuper) return -1;
+        if (!aSuper && bSuper) return 1;
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      });
+      setPendingUsers(sorted);
+      setPendingUiState((prev) => {
+        const next: Record<string, "default" | "approved" | "hold"> = {};
+        sorted.forEach((user) => {
+          const prevState = prev[user.id];
+          if (prevState === "approved") {
+            next[user.id] = "approved";
+            return;
+          }
+          if (user.status === "REJECTED") {
+            next[user.id] = "hold";
+            return;
+          }
+          next[user.id] = "default";
+        });
+        return next;
+      });
+    } catch (e: any) {
+      setPendingError(e?.message || "승인 대기 목록을 불러오지 못했습니다.");
+    } finally {
+      setPendingLoading(false);
+    }
+  }, [authTokens?.access, isSuperAdmin]);
+
+  useEffect(() => {
+    if (!isSuperAdmin) {
+      setPendingUsers([]);
+      setPendingError(null);
+      setPendingLoading(false);
+      setPendingUiState({});
+      return;
+    }
+    loadPendingUsers();
+  }, [isSuperAdmin, loadPendingUsers]);
+
+  const togglePendingAction = useCallback((id: string, active: boolean) => {
+    setPendingActionIds((prev) => {
+      if (active) {
+        if (prev.includes(id)) return prev;
+        return [...prev, id];
+      }
+      return prev.filter((item) => item !== id);
+    });
+  }, []);
+
+  const handleApprovePendingUser = useCallback(
+    async (id: string) => {
+      if (!authTokens?.access) return;
+      togglePendingAction(id, true);
+      setPendingError(null);
+      try {
+        await apiApproveUser(authTokens.access, id);
+        setPendingUsers((prev) =>
+          prev.map((user) =>
+            user.id === id ? { ...user, status: "APPROVED" } : user
+          )
+        );
+        setPendingUiState((prev) => ({ ...prev, [id]: "approved" }));
+      } catch (e: any) {
+        setPendingError(e?.message || "사용자 승인을 처리하지 못했습니다.");
+      } finally {
+        togglePendingAction(id, false);
+      }
+    },
+    [authTokens?.access, togglePendingAction]
+  );
+
+  const handleHoldPendingUser = useCallback(
+    async (id: string) => {
+      if (!authTokens?.access) return;
+      togglePendingAction(id, true);
+      setPendingError(null);
+      try {
+        await apiRejectUser(authTokens.access, id);
+        setPendingUsers((prev) =>
+          prev.map((user) =>
+            user.id === id ? { ...user, status: "REJECTED" } : user
+          )
+        );
+        setPendingUiState((prev) => ({ ...prev, [id]: "hold" }));
+      } catch (e: any) {
+        setPendingError(e?.message || "사용자 거부를 처리하지 못했습니다.");
+      } finally {
+        togglePendingAction(id, false);
+      }
+    },
+    [authTokens?.access, togglePendingAction]
+  );
+
+  const handleDeletePendingUser = useCallback(
+    async (id: string) => {
+      if (!authTokens?.access) return;
+      togglePendingAction(id, true);
+      setPendingError(null);
+      try {
+        await apiDeleteUser(authTokens.access, id);
+        setPendingUsers((prev) => prev.filter((user) => user.id !== id));
+        setPendingUiState((prev) => {
+          const next = { ...prev };
+          delete next[id];
+          return next;
+        });
+      } catch (e: any) {
+        setPendingError(e?.message || "사용자 삭제를 처리하지 못했습니다.");
+      } finally {
+        togglePendingAction(id, false);
+      }
+    },
+    [authTokens?.access, togglePendingAction]
+  );
   // 인증 상태에 따라 서버에서 대화 목록 로드
   useEffect(() => {
     if (!authTokens?.access) {
@@ -139,22 +357,23 @@ const App: React.FC = () => {
             .then((c) => {
               setConversations([c]);
               setActiveConversationId(c.id);
+              localStorage.setItem(LAST_CONV_KEY, c.id);
             })
             .catch((e) => console.error("create default conversation error:", e));
           return;
         }
         setConversations(list);
         setActiveConversationId((prev) => {
-            const saved = localStorage.getItem(LAST_CONV_KEY);
-            const fallback =
-              (saved && list.find((c) => c.id === saved)?.id) ||
-              (prev && list.find((c) => c.id === prev)?.id) ||
-              list[0]?.id ||
-              null;
-            if (fallback) {
-              localStorage.setItem(LAST_CONV_KEY, fallback);
-            }
-            return fallback;
+          const saved = localStorage.getItem(LAST_CONV_KEY);
+          const fallback =
+            (saved && list.find((c) => c.id === saved)?.id) ||
+            (prev && list.find((c) => c.id === prev)?.id) ||
+            list[0]?.id ||
+            null;
+          if (fallback) {
+            localStorage.setItem(LAST_CONV_KEY, fallback);
+          }
+          return fallback;
         });
       })
       .catch((e) => console.error("fetchConversations error:", e));
@@ -171,7 +390,10 @@ const App: React.FC = () => {
     }
     createConversation("새 테마")
       .then((conv) => {
-        setConversations((prev) => [conv, ...prev]);
+        setConversations((prev) => {
+          const next = [conv, ...prev];
+          return next;
+        });
         setActiveConversationId(conv.id);
         localStorage.setItem(LAST_CONV_KEY, conv.id);
       })
@@ -223,16 +445,17 @@ const App: React.FC = () => {
     }
     updateConversation(id, newTitle)
       .then((updated) => {
-        setConversations((prev) =>
-          prev.map((c: Conversation) =>
+        setConversations((prev) => {
+          const next = prev.map((c: Conversation) =>
             c.id === id
               ? {
                   ...c,
                   title: updated.title,
                 }
               : c
-          )
-        );
+          );
+          return next;
+        });
         setEditingConvId(null);
         setEditingTitle("");
       })
@@ -255,13 +478,16 @@ const App: React.FC = () => {
   // 지침 재로드 유틸
   const reloadGlobalGuides = () =>
     fetchGlobalGuides()
-      .then(setGlobalGuides)
+      .then((guides) => setGlobalGuides(guides.map((g) => normalizeGuide(g))))
       .catch((e) => console.error("reloadGlobalGuides error:", e));
 
   const reloadRoomGuides = (convId: string) =>
     fetchRoomGuides(convId)
       .then((guides) =>
-        setConversationGuides((prev) => ({ ...prev, [convId]: guides }))
+        setConversationGuides((prev) => ({
+          ...prev,
+          [convId]: guides.map((g) => normalizeGuide(g)),
+        }))
       )
       .catch((e) => console.error("reloadRoomGuides error:", e));
 
@@ -285,7 +511,7 @@ const App: React.FC = () => {
       return;
     }
     fetchGlobalGuides()
-      .then(setGlobalGuides)
+      .then((guides) => setGlobalGuides(guides.map((g) => normalizeGuide(g))))
       .catch((e) => console.error("fetchGlobalGuides error:", e));
   }, [authTokens?.access]);
 
@@ -303,7 +529,10 @@ const App: React.FC = () => {
       .catch((e) => console.error("fetchMessages error:", e));
     fetchRoomGuides(activeConversationId)
       .then((guides) =>
-        setConversationGuides((prev) => ({ ...prev, [activeConversationId]: guides }))
+        setConversationGuides((prev) => ({
+          ...prev,
+          [activeConversationId]: guides.map((g) => normalizeGuide(g)),
+        }))
       )
       .catch((e) => console.error("fetchRoomGuides error:", e));
   }, [authTokens?.access, activeConversationId]);
@@ -316,12 +545,13 @@ const App: React.FC = () => {
     }
     try {
       const defaultTitle = "새 지침";
-      const defaultContent = "지침 내용을 입력하세요.";
-      const created = await apiCreateGuide(scope, {
+      const defaultContent = "";
+      const createdRaw = await apiCreateGuide(scope, {
         title: defaultTitle,
         content: defaultContent,
         conversationId: scope === "conversation" ? activeConversationId || undefined : undefined,
       });
+      const created = normalizeGuide(createdRaw);
       if (scope === "global") {
         setGlobalGuides((prev) => [created, ...prev]);
         reloadGlobalGuides();
@@ -344,9 +574,17 @@ const App: React.FC = () => {
       return;
     }
     try {
+      const scopeForRequest = normalizeGuideScope(guide.scope);
       // 1) 파일 메타 준비: 기존 파일 + 새로 추가된 파일 업로드
       const filesPayload: GuideFile[] = [];
       const files = guide.files || [];
+      const conversationIdForGuide =
+        scopeForRequest === "conversation"
+          ? guide.conversationId || activeConversationId || undefined
+          : undefined;
+      if (scopeForRequest === "conversation" && !conversationIdForGuide) {
+        throw new Error("conversationId is required for conversation guide");
+      }
 
       // 기존 파일(이미 storageKey 있음)
       for (const f of files) {
@@ -376,7 +614,7 @@ const App: React.FC = () => {
             f.file,
             f.file.type || f.mimeType || "application/octet-stream"
           );
-          await commitFile({
+          const commitResult = await commitFile({
             engine: "iso",
             type: "guide",
             ownerId: guide.id,
@@ -385,46 +623,93 @@ const App: React.FC = () => {
             mimetype: f.file.type || f.mimeType || null,
             size: f.file.size,
           });
-          filesPayload.push({
-            id: f.id,
-            fileName: f.fileName || f.file.name,
-            fileSize: f.file.size,
-            mimeType: f.file.type || f.mimeType || null,
-            storageKey: objectKey,
-          });
+          const committedMeta: any = commitResult?.file ?? commitResult?.attachment ?? null;
+          const resolvedStorageKey = committedMeta?.storageKey || objectKey;
+          const resolvedFileSize =
+            typeof committedMeta?.fileSize === "number"
+              ? committedMeta.fileSize
+              : committedMeta?.fileSize != null
+              ? Number(committedMeta.fileSize)
+              : f.file.size;
+          const committedFile: GuideFile = {
+            id: committedMeta?.id || f.id,
+            fileName:
+              committedMeta?.fileName || f.fileName || f.file.name,
+            fileSize: resolvedFileSize ?? null,
+            mimeType:
+              committedMeta?.mimeType || f.file.type || f.mimeType || null,
+            storageKey: resolvedStorageKey,
+            downloadUrl: committedMeta?.downloadUrl,
+          };
+          filesPayload.push(committedFile);
+          f.id = committedFile.id;
+          f.fileName = committedFile.fileName;
+          f.fileSize = committedFile.fileSize ?? null;
+          f.mimeType = committedFile.mimeType ?? undefined;
+          f.storageKey = committedFile.storageKey;
+          f.downloadUrl = committedFile.downloadUrl;
+          f.file = undefined;
         }
       }
 
-      const updated = await apiUpdateGuide(guide.scope, guide.id, {
+      const uniquePayload = filesPayload.reduce<GuideFile[]>((acc, item) => {
+        const key = item.storageKey || `${item.fileName || ""}::${item.fileSize ?? ""}`;
+        if (key && acc.some((f) => (f.storageKey || `${f.fileName || ""}::${f.fileSize ?? ""}`) === key)) {
+          return acc;
+        }
+        acc.push(item);
+        return acc;
+      }, []);
+
+      const updatePayload: {
+        title: string;
+        content: string;
+        conversationId?: string;
+        files?: GuideFile[];
+      } = {
         title: guide.title,
         content: guide.content,
-        conversationId: guide.conversationId,
-        files: filesPayload,
-      });
-      if (guide.scope === "global") {
+        conversationId: conversationIdForGuide,
+      };
+      if (uniquePayload.length > 0) {
+        updatePayload.files = uniquePayload;
+      }
+
+      const updatedRaw = await apiUpdateGuide(scopeForRequest, guide.id, updatePayload);
+      const updated = normalizeGuide(updatedRaw);
+      if (scopeForRequest === "global") {
         setGlobalGuides((prev) =>
           prev.map((g) => (g.id === updated.id ? updated : g))
         );
-        reloadGlobalGuides();
         return updated;
       }
       const convId = guide.conversationId;
-      if (!convId) return updated;
+      if (!convId && !conversationIdForGuide) return updated;
+      const targetConvId = convId || conversationIdForGuide;
       setConversationGuides((prev) => {
-        const list: Guide[] = prev[convId] || [];
+        const list: Guide[] = targetConvId ? prev[targetConvId] || [] : [];
         const idx = list.findIndex((g) => g.id === updated.id);
         if (idx === -1) {
           return {
             ...prev,
-            [convId]: [updated, ...list],
+            ...(targetConvId
+              ? {
+                  [targetConvId]: [updated, ...list],
+                }
+              : {}),
           };
         }
         return {
           ...prev,
-          [convId]: list.map((g) => (g.id === updated.id ? updated : g)),
+          ...(targetConvId
+            ? {
+                [targetConvId]: list.map((g) =>
+                  g.id === updated.id ? updated : g
+                ),
+              }
+            : {}),
         };
       });
-      if (guide.conversationId) reloadRoomGuides(guide.conversationId);
       return updated;
     } catch (e: any) {
       setError(e?.message || "지침 저장에 실패했습니다.");
@@ -501,10 +786,10 @@ const App: React.FC = () => {
   };
 
   // 인증 핸들러
-  const handleLogin = async (email: string, password: string) => {
+  const handleLogin = async (email: string, password: string, otp?: string) => {
     try {
       setAuthStatus("로그인 중...");
-      const res = await authLogin(email, password);
+      const res = await authLogin(email, password, otp);
       setAuthUser(res.user);
       setAuthTokens(res.tokens);
       setAuthStatus("로그인 완료");
@@ -517,9 +802,9 @@ const App: React.FC = () => {
     try {
       setAuthStatus("회원가입 중...");
       const res = await authRegister(email, password);
-      setAuthUser(res.user);
-      setAuthTokens(res.tokens);
-      setAuthStatus("회원가입 완료");
+      const message =
+        res.message || "계정이 생성되었습니다. 관리자 승인 대기 중입니다.";
+      setAuthStatus(message);
     } catch (e: any) {
       setAuthStatus(e?.message || "회원가입 실패");
     }
@@ -530,26 +815,26 @@ const App: React.FC = () => {
     setAuthTokens(null);
     setAuthStatus("로그아웃됨");
     localStorage.removeItem(LAST_CONV_KEY);
+    setPendingUsers([]);
+    setPendingActionIds([]);
+    setPendingError(null);
+    setPendingLoading(false);
+    setPendingUiState({});
   };
 
   /* --------------------------------
    * 6.5. 우측 패널 표시용 첨부/지침 요약
    * -------------------------------- */
-  const commonGuideFiles = globalGuides
-    .flatMap((g) => g.files || [])
-    .map((f) => ({
+  const selectGuideFilesForPanel = (guides: Guide[]) =>
+    sortGuideFilesAsc(guides.flatMap((g) => g.files || [])).map((f) => ({
       id: f.id || f.storageKey || f.fileName,
       fileName: f.fileName || "(파일)",
       downloadUrl: f.downloadUrl,
     }));
 
-  const roomGuideFiles = activeConvGuides
-    .flatMap((g) => g.files || [])
-    .map((f) => ({
-      id: f.id || f.storageKey || f.fileName,
-      fileName: f.fileName || "(파일)",
-      downloadUrl: f.downloadUrl,
-    }));
+  const commonGuideFiles = selectGuideFilesForPanel(globalGuides);
+
+  const roomGuideFiles = selectGuideFilesForPanel(activeConvGuides);
 
   const messageAttachments = (activeConversation?.messages || [])
     .flatMap((m) => m.attachments || [])
@@ -624,22 +909,20 @@ const App: React.FC = () => {
         }
       }
 
-      // 3) 서버 상태 재조회하여 UI를 DB 기반으로 동기화
-      const serverMsgs = await fetchMessages(activeConversationId);
-      setConversations((prev) =>
-        prev.map((c: Conversation) =>
-          c.id === activeConversationId ? { ...c, messages: serverMsgs } : c
-        )
-      );
       setAttachedFiles([]); // 첨부 초기화
 
-      // 4) ISO 챗 호출 (서버에 저장된 메시지 배열 사용)
+      // 3) ISO 챗 호출 (서버에 저장된 메시지 배열 사용)
+      // 메시지 목록은 서버에서 최신화된 후 assistant 메시지까지 포함하여 최종 fetch 1회만 수행
+      await createMessage(activeConversationId, "assistant", "pending"); // 임시 assistant 메시지 생성(실제 답변은 아래에서 fetch)
+      const finalMsgs = await fetchMessages(activeConversationId);
+
+      // ISO 챗 호출
       const payload = {
         message: messageContent,
         model,
         runMode,
         answerMode,
-        messages: serverMsgs.map((m) => ({ role: m.role, content: m.content })),
+        messages: finalMsgs.map((m) => ({ role: m.role, content: m.content })),
         globalGuides: globalGuides.map((g: Guide) => ({
           id: g.id,
           title: g.title,
@@ -657,22 +940,16 @@ const App: React.FC = () => {
       const assistantText: string =
         res?.reply?.content || res?.reply || res?.content || "";
 
-      const assistantMsg: Message = {
-        role: "assistant",
-        content:
-          assistantText && assistantText.trim().length > 0
-            ? assistantText
-            : "유효한 정보를 찾지 못했습니다. 추가 기초 정보를 제공해 주시면 더 정확한 답변을 드리겠습니다.",
-      };
-
-      // 서버에 어시스턴트 메시지 저장
-      await createMessage(activeConversationId, "assistant", assistantMsg.content);
+      // 서버에 어시스턴트 메시지 저장(실제 답변으로 업데이트)
+      await createMessage(activeConversationId, "assistant", assistantText && assistantText.trim().length > 0
+        ? assistantText
+        : "유효한 정보를 찾지 못했습니다. 추가 기초 정보를 제공해 주시면 더 정확한 답변을 드리겠습니다.");
 
       // 최종 메시지 목록을 다시 동기화
-      const finalMsgs = await fetchMessages(activeConversationId);
+      const syncedMsgs = await fetchMessages(activeConversationId);
       setConversations((prev) =>
         prev.map((c: Conversation) =>
-          c.id === activeConversationId ? { ...c, messages: finalMsgs } : c
+          c.id === activeConversationId ? { ...c, messages: syncedMsgs } : c
         )
       );
     } catch (err: any) {
@@ -729,6 +1006,7 @@ const App: React.FC = () => {
             const arr = [...prev];
             const [removed] = arr.splice(from, 1);
             arr.splice(to, 0, removed);
+            void apiReorderConversations(arr.map((c) => c.id));
             return arr;
           });
         }}
@@ -772,6 +1050,15 @@ const App: React.FC = () => {
         onRegister={handleRegister}
         onLogout={handleLogout}
         loginInputRef={loginEmailRef}
+        pendingUsers={pendingUsers}
+        pendingLoading={pendingLoading}
+        pendingError={pendingError}
+        pendingActionIds={pendingActionIds}
+        pendingUiState={pendingUiState}
+        onReloadPending={loadPendingUsers}
+        onApprovePendingUser={handleApprovePendingUser}
+        onHoldPendingUser={handleHoldPendingUser}
+        onDeletePendingUser={handleDeletePendingUser}
       />
 
       {/* 플로팅 지침/가이드 패널 (GuidePanel.tsx는 기존 버전 유지) */}

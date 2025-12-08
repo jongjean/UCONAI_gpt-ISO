@@ -1,6 +1,6 @@
 console.log("BUILD_VERSION: 2025-12-04- 최신반영");
 
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Conversation } from "../types/isoChat";
 
 interface SidebarProps {
@@ -38,6 +38,7 @@ const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
+  const titleInputRef = useRef<HTMLInputElement | null>(null);
 
   const handleDragStart = (index: number) => {
     setDragIndex(index);
@@ -69,12 +70,23 @@ const Sidebar: React.FC<SidebarProps> = ({
     setHoverIndex(null);
   };
 
+  useEffect(() => {
+    if (!editingConvId) return;
+    const handler = requestAnimationFrame(() => {
+      if (titleInputRef.current) {
+        titleInputRef.current.focus();
+        titleInputRef.current.select();
+      }
+    });
+    return () => cancelAnimationFrame(handler);
+  }, [editingConvId]);
+
   return (
     <aside className="iso-sidebar">
       <div className="iso-sidebar-header">
         <div className="iso-sidebar-title">UCONAI gpt-ISO Expert</div>
         <div className="iso-sidebar-sub">
-          ISO/IEC JTC 1 SC 36 · PWI 26255 · TR 25468 국제 표준 작업 전용 어시스턴트
+          ISO/IEC JTC 1 SC 36 · IS 26255 · TR 25468 국제 표준 작업 전용 어시스턴트
         </div>
         <button
           className="iso-sidebar-new-btn"
@@ -144,6 +156,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                 >
                   {editingConvId === c.id ? (
                     <input
+                      ref={titleInputRef}
                       type="text"
                       value={editingTitle}
                       autoFocus

@@ -71,12 +71,13 @@ body {
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  background: linear-gradient(90deg, #8b5cf6, #ec4899);
-  color: white;
+  background: #6d28d9;
+  color: #ffffff;
+  transition: background-color 0.2s ease;
 }
 
 .iso-sidebar-new-btn:hover {
-  opacity: 0.9;
+  background: #5b21b6;
 }
 
 .iso-sidebar-section {
@@ -214,21 +215,40 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding-right: 2px; /* 스크롤바와 여백 */
+  padding-right: 2px;
 }
 
 .iso-rightbar-section {
   font-size: 12px;
   border-radius: 12px;
-  padding: 10px 10px;
+  padding: 12px 12px;
   background: #020617;
-  border: 1px solid #111827;
+  border: 1px solid #29324d;
 }
 
 .iso-rightbar-section-title {
   font-weight: 600;
   margin-bottom: 6px;
   font-size: 12px;
+  color: #e5e7eb;
+}
+
+.iso-rightbar-title-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.iso-rightbar-subtitle {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: rgba(109, 40, 217, 0.18);
+  color: #c4b5fd;
+  font-size: 11px;
+  font-weight: 600;
+  margin-bottom: 6px;
 }
 
 .iso-rightbar-section + .iso-rightbar-section {

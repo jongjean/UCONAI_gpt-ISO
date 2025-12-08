@@ -61,6 +61,15 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
 
   const [hiddenMessages, setHiddenMessages] = React.useState<Set<string>>(new Set());
   const [confirmTarget, setConfirmTarget] = React.useState<string | null>(null);
+  const cancelConfirmRef = React.useRef<HTMLButtonElement | null>(null);
+  const deleteConfirmRef = React.useRef<HTMLButtonElement | null>(null);
+  const confirmDialogLabelId = React.useId();
+
+  React.useEffect(() => {
+    if (confirmTarget) {
+      cancelConfirmRef.current?.focus();
+    }
+  }, [confirmTarget]);
 
   const storageKey = React.useMemo(
     () => (activeConversation?.id ? `hiddenMessages:${activeConversation.id}` : "hiddenMessages:none"),
@@ -306,8 +315,34 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
     );
   };
 
+  const handleConfirmSubmit = React.useCallback(() => {
+    if (!confirmTarget) return;
+    hideMessage(confirmTarget);
+    setConfirmTarget(null);
+  }, [confirmTarget]);
+
+  const handleConfirmKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      handleConfirmSubmit();
+    }
+  };
+
   const renderConfirmModal = () => {
     if (!confirmTarget) return null;
+
+    const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setConfirmTarget(null);
+        return;
+      }
+      if (event.key === "Enter" && event.target === event.currentTarget) {
+        event.preventDefault();
+        handleConfirmSubmit();
+      }
+    };
+
     return (
       <div
         style={{
@@ -321,18 +356,30 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
         }}
       >
         <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={confirmDialogLabelId}
+          tabIndex={-1}
+          onKeyDown={handleKeyDown}
           style={{
             background: "#fff",
             borderRadius: 12,
             padding: 16,
             width: 280,
             boxShadow: "0 10px 30px rgba(0,0,0,0.2)",
+            outline: "none",
           }}
         >
-          <div style={{ fontWeight: 700, marginBottom: 8 }}>삭제하시겠습니까?</div>
+          <div
+            id={confirmDialogLabelId}
+            style={{ fontWeight: 700, marginBottom: 8 }}
+          >
+            삭제하시겠습니까?
+          </div>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
             <button
               type="button"
+              ref={cancelConfirmRef}
               onClick={() => setConfirmTarget(null)}
               style={{
                 padding: "6px 10px",
@@ -346,10 +393,9 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
             </button>
             <button
               type="button"
-              onClick={() => {
-                hideMessage(confirmTarget);
-                setConfirmTarget(null);
-              }}
+              ref={deleteConfirmRef}
+              onClick={handleConfirmSubmit}
+              onKeyDown={handleConfirmKeyDown}
               style={{
                 padding: "6px 12px",
                 borderRadius: 8,
