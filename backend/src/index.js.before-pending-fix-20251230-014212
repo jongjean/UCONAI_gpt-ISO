@@ -111,7 +111,7 @@ app.post("/api/iso-chat", upload.single("file"), async (req, res) => {
     } = req.body;
     const file = req.file;
 
-    const selectedModel = model || process.env.OPENAI_MODEL || "gpt-5.2";
+    const selectedModel = model || process.env.OPENAI_MODEL || "gpt-5.2-pro";
 
     console.log("[ISO-CHAT] request", {
       ts: new Date().toISOString(),

@@ -1,8 +1,7 @@
 export const AVAILABLE_MODELS = [
-  { id: "gpt-5.1", label: "gpt-5.1 (최신, ISO 메인용)" },
-  { id: "gpt-5.1-mini", label: "gpt-5.1-mini (가벼운 작업)" },
-  { id: "gpt-4.1", label: "gpt-4.1 (안정형)" },
-  { id: "gpt-4.1-mini", label: "gpt-4.1-mini" },
-  { id: "o3-mini", label: "o3-mini (고난도 추론용, 실험)" },
-  // 필요시 추가
+  { id: "gpt-4o", label: "🥇 GPT-4o (최신)" },
+  { id: "gpt-4o-mini", label: "💡 GPT-4o Mini (경량)" },
+  { id: "gpt-4-turbo", label: "⚡ GPT-4 Turbo" },
+  { id: "gpt-4", label: "🔧 GPT-4" },
+  { id: "gpt-3.5-turbo", label: "💨 GPT-3.5 Turbo" }
 ];

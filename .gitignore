@@ -1,24 +1,37 @@
-# 백업 및 대용량 압축파일 푸시 제외
-*.tar.gz
-# Node
-node_modules
-npm-debug.log
+# Dependencies
+node_modules/
+package-lock.json
 yarn.lock
-pnpm-lock.yaml
 
-# Env
+# Environment variables
 .env
 .env.local
-backend/.env
-frontend/.env
+.env.*.local
 
-# Build
-dist
-build
-
-# Logs
-logs
+# Build outputs
+dist/
+build/
 *.log
 
-# Others
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
 .DS_Store
+Thumbs.db
+
+# Backups
+*.backup
+*.backup-*
+*-backup-*
+
+# Database
+*.db
+*.sqlite
+
+# Temporary files
+*.tmp
+.cache/

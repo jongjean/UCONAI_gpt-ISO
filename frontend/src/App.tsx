@@ -40,7 +40,7 @@ import {
   deleteConversation as apiDeleteConversation,
   reorderConversations as apiReorderConversations,
 } from "./api/conversations";
-import { fetchMessages, createMessage } from "./api/messages";
+import { fetchMessages, addMessage } from "./api/messages";
 import {
   presignUpload,
   uploadWithPresignedUrl,
@@ -443,7 +443,7 @@ const App: React.FC = () => {
       setEditingTitle("");
       return;
     }
-    updateConversation(id, newTitle)
+    updateConversation(id, { title: newTitle })
       .then((updated) => {
         setConversations((prev) => {
           const next = prev.map((c: Conversation) =>
@@ -881,7 +881,7 @@ const App: React.FC = () => {
 
     try {
       // 1) 서버에 사용자 메시지 생성 (DB에 저장되어야 첨부파일 ownerId 사용 가능)
-      const createdUserMsg = await createMessage(
+      const createdUserMsg = await addMessage(
         activeConversationId,
         "user",
         messageContent
@@ -913,7 +913,6 @@ const App: React.FC = () => {
 
       // 3) ISO 챗 호출 (서버에 저장된 메시지 배열 사용)
       // 메시지 목록은 서버에서 최신화된 후 assistant 메시지까지 포함하여 최종 fetch 1회만 수행
-      await createMessage(activeConversationId, "assistant", "pending"); // 임시 assistant 메시지 생성(실제 답변은 아래에서 fetch)
       const finalMsgs = await fetchMessages(activeConversationId);
 
       // ISO 챗 호출
@@ -938,10 +937,11 @@ const App: React.FC = () => {
 
       const res = await requestIsoChat(payload);
       const assistantText: string =
-        res?.reply?.content || res?.reply || res?.content || "";
-
+        typeof res?.reply === "string"
+          ? res.reply
+          : res?.reply?.content || res?.content || "";
       // 서버에 어시스턴트 메시지 저장(실제 답변으로 업데이트)
-      await createMessage(activeConversationId, "assistant", assistantText && assistantText.trim().length > 0
+      await addMessage(activeConversationId, "assistant", assistantText && assistantText.trim().length > 0
         ? assistantText
         : "유효한 정보를 찾지 못했습니다. 추가 기초 정보를 제공해 주시면 더 정확한 답변을 드리겠습니다.");
 

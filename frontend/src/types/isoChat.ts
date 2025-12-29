@@ -66,3 +66,22 @@ export interface AttachedFile {
   name: string;
   file: File;
 }
+
+// ISO Chat API 요청/응답 타입
+export interface IsoChatPayload {
+  message: string;
+  model: ModelOption;
+  runMode: RunMode;
+  answerMode: AnswerMode;
+  messages: { role: string; content: string }[];
+  globalGuides?: { id: string; title: string; content: string }[];
+  convGuides?: { id: string; title: string; content: string }[];
+  accessToken?: string;
+}
+
+export interface IsoChatResponse {
+  reply: {
+    content: string;
+  } | string;
+  content?: string;
+}

@@ -1,91 +1,87 @@
-// src/api/guides.ts
-import { apiClient } from "./client";
-import { Guide, GuideFile } from "../types/isoChat";
+import { Guide } from "../types/isoChat";
 
-export async function fetchGlobalGuides() {
-  const res = await apiClient.get<Guide[]>("/ucon/iso/guides/global");
-  return res.data;
+const GLOBAL_KEY = "iso_global_guides";
+const ROOM_KEY_PREFIX = "iso_room_guides_";
+
+export async function fetchGlobalGuides(): Promise<Guide[]> {
+  const stored = localStorage.getItem(GLOBAL_KEY);
+  return stored ? JSON.parse(stored) : [];
 }
 
-export async function fetchRoomGuides(conversationId: string) {
-  const res = await apiClient.get<Guide[]>(
-    `/ucon/iso/guides/room/${conversationId}`
-  );
-  return res.data;
+export async function fetchRoomGuides(conversationId: string): Promise<Guide[]> {
+  const stored = localStorage.getItem(`${ROOM_KEY_PREFIX}${conversationId}`);
+  return stored ? JSON.parse(stored) : [];
 }
 
 export async function createGuide(
-  scope: "global" | "conversation",
-  payload: { title: string; content: string; conversationId?: string; files?: GuideFile[] }
-) {
-  if (scope === "global") {
-    const res = await apiClient.post<Guide>("/ucon/iso/guides/global", {
-      title: payload.title,
-      content: payload.content,
-      files: payload.files,
-    });
-    return res.data;
-  }
-  if (!payload.conversationId) {
-    throw new Error("conversationId is required for conversation guide");
-  }
-  const res = await apiClient.post<Guide>(
-    `/ucon/iso/guides/room/${payload.conversationId}`,
-    {
-      title: payload.title,
-      content: payload.content,
-      files: payload.files,
-    }
-  );
-  return res.data;
+  _scope: "global" | "conversation",
+  data: { title: string; content: string; conversationId?: string }
+): Promise<Guide> {
+  const { title, content, conversationId } = data;
+  const key = conversationId ? `${ROOM_KEY_PREFIX}${conversationId}` : GLOBAL_KEY;
+  const guides = JSON.parse(localStorage.getItem(key) || "[]");
+  
+  const now = new Date().toISOString();
+  const newGuide: Guide = {
+    id: Date.now().toString(),
+    title,
+    content,
+    scope: conversationId ? "conversation" : "global",
+    conversationId,
+    files: [],
+    createdAt: now,
+    updatedAt: now,
+  };
+  
+  guides.push(newGuide);
+  localStorage.setItem(key, JSON.stringify(guides));
+  return newGuide;
 }
 
 export async function updateGuide(
-  scope: "global" | "conversation",
+  _scope: "global" | "conversation",
   id: string,
-  payload: { title?: string; content?: string; conversationId?: string; files?: GuideFile[] }
-) {
-  if (scope === "global") {
-    const res = await apiClient.put<Guide>(`/ucon/iso/guides/global/${id}`, {
-      title: payload.title,
-      content: payload.content,
-      files: payload.files,
-    });
-    return res.data;
-  }
-  if (!payload.conversationId) {
-    throw new Error("conversationId is required for conversation guide");
-  }
-  const res = await apiClient.put<Guide>(
-    `/ucon/iso/guides/room/${payload.conversationId}/${id}`,
-    {
-      title: payload.title,
-      content: payload.content,
-      files: payload.files,
-    }
-  );
-  return res.data;
+  data: { title?: string; content?: string; conversationId?: string }
+): Promise<Guide> {
+  const { conversationId, ...updates } = data;
+  const key = conversationId ? `${ROOM_KEY_PREFIX}${conversationId}` : GLOBAL_KEY;
+  const guides = JSON.parse(localStorage.getItem(key) || "[]");
+  
+  const index = guides.findIndex((g: Guide) => g.id === id);
+  if (index === -1) throw new Error("Guide not found");
+  
+  guides[index] = { 
+    ...guides[index], 
+    ...updates,
+    updatedAt: new Date().toISOString()
+  };
+  localStorage.setItem(key, JSON.stringify(guides));
+  return guides[index];
 }
 
 export async function deleteGuide(
-  scope: "global" | "conversation",
+  _scope: "global" | "conversation",
   id: string,
   conversationId?: string
-) {
-  if (scope === "global") {
-    await apiClient.delete(`/ucon/iso/guides/global/${id}`);
-    return;
-  }
-  if (!conversationId) {
-    throw new Error("conversationId is required for conversation guide");
-  }
-  await apiClient.delete(`/ucon/iso/guides/room/${conversationId}/${id}`);
+): Promise<void> {
+  const key = conversationId ? `${ROOM_KEY_PREFIX}${conversationId}` : GLOBAL_KEY;
+  const guides = JSON.parse(localStorage.getItem(key) || "[]");
+  const filtered = guides.filter((g: Guide) => g.id !== id);
+  localStorage.setItem(key, JSON.stringify(filtered));
 }
 
-export async function reorderGlobalGuides(guideIds: string[]) {
-  await apiClient.post("/ucon/iso/guides/global/reorder", { orderedIds: guideIds });
+export async function reorderGlobalGuides(guideIds: string[]): Promise<void> {
+  const guides = await fetchGlobalGuides();
+  const reordered = guideIds
+    .map(id => guides.find(g => g.id === id))
+    .filter(Boolean) as Guide[];
+  localStorage.setItem(GLOBAL_KEY, JSON.stringify(reordered));
 }
 
-export async function reorderRoomGuides(conversationId: string, guideIds: string[]) {
-  await apiClient.post(`/ucon/iso/guides/room/${conversationId}/reorder`, { orderedIds: guideIds });
+export async function reorderRoomGuides(conversationId: string, guideIds: string[]): Promise<void> {
+  const guides = await fetchRoomGuides(conversationId);
+  const reordered = guideIds
+    .map(id => guides.find(g => g.id === id))
+    .filter(Boolean) as Guide[];
+  localStorage.setItem(`${ROOM_KEY_PREFIX}${conversationId}`, JSON.stringify(reordered));
 }

@@ -1,51 +1,62 @@
-// src/api/messages.ts
-import { apiClient } from "./client";
-import { Message, MessageAttachment } from "../types/isoChat";
+import { Message } from "../types/isoChat";
 
-type MessageResponse = {
-  id: string;
-  conversationId: string;
-  role: "USER" | "ASSISTANT" | "SYSTEM";
-  content: string;
-  createdAt: string;
-  updatedAt?: string;
-  attachments?: Array<{
-    id: string;
-    fileName: string;
-    fileSize: number | null;
-    mimeType?: string | null;
-    storageKey: string;
-    downloadUrl?: string;
-  }>;
-};
-
-const toClientMessage = (m: MessageResponse): Message => ({
-  id: m.id,
-  role: m.role.toLowerCase() as Message["role"],
-  content: m.content,
-   createdAt: m.createdAt,
-  attachments: (m.attachments || []).map<MessageAttachment>((a) => ({
-    ...a,
-  })),
-});
+const MESSAGES_KEY_PREFIX = "iso_messages_";
 
 export async function fetchMessages(conversationId: string): Promise<Message[]> {
-  const res = await apiClient.get<MessageResponse[]>("/ucon/iso/messages", {
-    params: { conversationId },
-  });
-  return res.data.map(toClientMessage);
+  const key = `${MESSAGES_KEY_PREFIX}${conversationId}`;
+  const stored = localStorage.getItem(key);
+  return stored ? JSON.parse(stored) : [];
 }
 
-export async function createMessage(
+// App.tsx에서 사용하는 형태: addMessage(conversationId, role, content)
+export async function addMessage(
   conversationId: string,
-  role: Message["role"],
-  content: string
+  roleOrMessage: string | Message,
+  content?: string
 ): Promise<Message> {
-  const payload = {
-    conversationId,
-    role: role.toUpperCase(),
-    content,
-  };
-  const res = await apiClient.post<MessageResponse>("/ucon/iso/messages", payload);
-  return toClientMessage(res.data);
+  const messages = await fetchMessages(conversationId);
+  
+  let newMessage: Message;
+  
+  if (typeof roleOrMessage === 'string') {
+    // addMessage(conversationId, role, content) 형태
+    const now = new Date().toISOString();
+    newMessage = {
+      id: Date.now().toString(),
+      role: roleOrMessage as "user" | "assistant",
+      content: content || "",
+      createdAt: now,  // timestamp → createdAt
+    };
+  } else {
+    // addMessage(conversationId, message) 형태
+    newMessage = roleOrMessage;
+  }
+  
+  messages.push(newMessage);
+  localStorage.setItem(`${MESSAGES_KEY_PREFIX}${conversationId}`, JSON.stringify(messages));
+  return newMessage;
+}
+
+export async function updateMessage(
+  conversationId: string,
+  messageId: string,
+  updates: Partial<Message>
+): Promise<Message> {
+  const messages = await fetchMessages(conversationId);
+  const index = messages.findIndex(m => m.id === messageId);
+  if (index === -1) throw new Error("Message not found");
+  
+  messages[index] = { ...messages[index], ...updates };
+  localStorage.setItem(`${MESSAGES_KEY_PREFIX}${conversationId}`, JSON.stringify(messages));
+  return messages[index];
+}
+
+export async function deleteMessage(conversationId: string, messageId: string): Promise<void> {
+  const messages = await fetchMessages(conversationId);
+  const filtered = messages.filter(m => m.id !== messageId);
+  localStorage.setItem(`${MESSAGES_KEY_PREFIX}${conversationId}`, JSON.stringify(filtered));
+}
+
+export async function clearMessages(conversationId: string): Promise<void> {
+  localStorage.removeItem(`${MESSAGES_KEY_PREFIX}${conversationId}`);
 }
