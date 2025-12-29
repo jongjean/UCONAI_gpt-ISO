@@ -35,3 +35,8 @@ Thumbs.db
 # Temporary files
 *.tmp
 .cache/
+
+# Large backup files
+*.tar.gz
+*.zip
+frontend_full_backup_*.tar.gz
