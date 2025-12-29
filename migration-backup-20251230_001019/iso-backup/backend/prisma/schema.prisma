@@ -1,0 +1,138 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Conversation (chat room)
+model Conversation {
+  id        String   @id @default(uuid()) @db.Uuid
+  title     String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+  sortIndex Int      @default(0) @map("sort_order")
+
+  userId String? @map("user_id") @db.Uuid
+  user   User?   @relation(fields: [userId], references: [id])
+
+  messages Message[]
+  guides   Guide[]
+
+  @@map("conversations")
+}
+
+// Message
+model Message {
+  id             String      @id @default(uuid()) @db.Uuid
+  conversationId String      @map("conversation_id") @db.Uuid
+  role           MessageRole
+  content        String
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+  isEdited  Boolean  @default(false) @map("is_edited")
+  isDeleted Boolean  @default(false) @map("is_deleted")
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  attachments  MessageAttachment[]
+
+  @@map("messages")
+}
+
+// Guide
+model Guide {
+  id             String     @id @default(uuid()) @db.Uuid
+  scope          GuideScope
+  conversationId String?    @map("conversation_id") @db.Uuid
+  title          String
+  content        String
+  sortIndex      Int        @default(0) @map("sort_order")
+
+  userId String? @map("user_id") @db.Uuid
+  user   User?   @relation(fields: [userId], references: [id])
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  files        GuideFile[]
+
+  @@map("guides")
+}
+
+// Guide attachments
+model GuideFile {
+  id         String   @id @default(uuid()) @db.Uuid
+  guideId    String   @map("guide_id") @db.Uuid
+  fileName   String   @map("file_name")
+  fileSize   BigInt   @map("file_size")
+  mimeType   String?  @map("mime_type")
+  storageKey String   @map("storage_key")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  guide Guide @relation(fields: [guideId], references: [id], onDelete: Cascade)
+
+  @@map("guide_files")
+}
+
+// Message attachments
+model MessageAttachment {
+  id         String   @id @default(uuid()) @db.Uuid
+  messageId  String   @map("message_id") @db.Uuid
+  fileName   String   @map("file_name")
+  fileSize   BigInt   @map("file_size")
+  mimeType   String?  @map("mime_type")
+  storageKey String   @map("storage_key")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@map("message_attachments")
+}
+
+// Message role
+enum MessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+}
+
+// Guide scope
+enum GuideScope {
+  GLOBAL
+  CONVERSATION
+}
+
+// User
+model User {
+  id            String   @id @default(uuid()) @db.Uuid
+  email         String   @unique
+  passwordHash  String   @map("password_hash")
+  createdAt     DateTime @default(now()) @map("created_at")
+  totpSecret    String?  @map("totp_secret")
+  totpEnabled   Boolean  @default(false) @map("totp_enabled")
+
+  status        UserStatus @default(PENDING)
+  role          UserRole   @default(USER)
+  approvedAt    DateTime?  @map("approved_at")
+  approvedById  String?    @map("approved_by_id") @db.Uuid
+  approvedBy    User?      @relation("UserApprovals", fields: [approvedById], references: [id])
+  approvedUsers User[]     @relation("UserApprovals")
+
+  conversations Conversation[]
+  guides        Guide[]
+}
+
+enum UserStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum UserRole {
+  USER
+  SUPER_ADMIN
+}
