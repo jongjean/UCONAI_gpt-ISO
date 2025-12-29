@@ -73,7 +73,11 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
   const [editing, setEditing] = useState<Guide | null>(null);
 
   // 패널 위치/크기
-  const [pos, setPos] = useState({ x: window.innerWidth / 2 - 360, y: 60 });
+  const [viewport, setViewport] = useState({
+    width: typeof window !== "undefined" ? window.innerWidth : 1280,
+    height: typeof window !== "undefined" ? window.innerHeight : 720,
+  });
+  const [pos, setPos] = useState({ x: viewport.width / 2 - 360, y: 60 });
   const [size, setSize] = useState({ width: 720, height: 560 });
 
   const [dragging, setDragging] = useState(false);
@@ -123,6 +127,25 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
       sendStatusTimerRef.current = null;
     }
   }, []);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setViewport({
+        width: window.innerWidth,
+        height: window.innerHeight,
+      });
+    };
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    if (viewport.width <= 900) {
+      setPos({ x: 0, y: 0 });
+      setSize({ width: viewport.width, height: viewport.height });
+    }
+  }, [viewport.width, viewport.height, isOpen]);
 
   useEffect(() => {
     restorationAttemptedRef.current = false;
@@ -1015,25 +1038,40 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
   /* ------------------------------------------------
    * 2. 패널 드래그 / 리사이즈
    * ------------------------------------------------ */
-  const handleDragMouseDown = (e: React.MouseEvent) => {
-    e.preventDefault();
+  const isMobileViewport = viewport.width <= 900;
+
+  const beginDrag = (clientX: number, clientY: number) => {
+    if (isMobileViewport) return;
     setDragging(true);
-    dragOffsetRef.current = {
-      x: e.clientX - pos.x,
-      y: e.clientY - pos.y,
-    };
+    dragOffsetRef.current = { x: clientX - pos.x, y: clientY - pos.y };
   };
 
-  const handleResizeMouseDown = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
+  const beginResize = (clientX: number, clientY: number) => {
+    if (isMobileViewport) return;
     setResizing(true);
     resizeStartRef.current = {
-      x: e.clientX,
-      y: e.clientY,
+      x: clientX,
+      y: clientY,
       width: size.width,
       height: size.height,
     };
+  };
+
+  const handleDragMouseDown = (e: React.MouseEvent | React.TouchEvent) => {
+    e.preventDefault();
+    if (isMobileViewport) return;
+    const point = "touches" in e ? e.touches[0] : e;
+    if (!point) return;
+    beginDrag(point.clientX, point.clientY);
+  };
+
+  const handleResizeMouseDown = (e: React.MouseEvent | React.TouchEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (isMobileViewport) return;
+    const point = "touches" in e ? e.touches[0] : e;
+    if (!point) return;
+    beginResize(point.clientX, point.clientY);
   };
 
   useEffect(() => {
@@ -1075,11 +1113,48 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
       setResizing(false);
     };
 
+    const handleTouchMove = (e: TouchEvent) => {
+      const t = e.touches[0];
+      if (!t) return;
+      if (dragging) {
+        const { x: ox, y: oy } = dragOffsetRef.current;
+        const rawX = t.clientX - ox;
+        const rawY = t.clientY - oy;
+        const maxX = window.innerWidth - size.width;
+        const maxY = window.innerHeight - size.height;
+        setPos({
+          x: Math.max(0, Math.min(maxX, rawX)),
+          y: Math.max(0, Math.min(maxY, rawY)),
+        });
+      } else if (resizing) {
+        const start = resizeStartRef.current;
+        const dx = t.clientX - start.x;
+        const dy = t.clientY - start.y;
+
+        const maxWidth = window.innerWidth * 0.95;
+        const maxHeight = window.innerHeight * 0.9;
+        const newWidth = Math.max(480, Math.min(maxWidth, start.width + dx));
+        const newHeight = Math.max(360, Math.min(maxHeight, start.height + dy));
+        setSize({ width: newWidth, height: newHeight });
+      }
+    };
+
+    const handleTouchEnd = () => {
+      setDragging(false);
+      setResizing(false);
+    };
+
     window.addEventListener("mousemove", handleMouseMove);
     window.addEventListener("mouseup", handleMouseUp);
+    window.addEventListener("touchmove", handleTouchMove, { passive: false });
+    window.addEventListener("touchend", handleTouchEnd);
+    window.addEventListener("touchcancel", handleTouchEnd);
     return () => {
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
+      window.removeEventListener("touchmove", handleTouchMove);
+      window.removeEventListener("touchend", handleTouchEnd);
+      window.removeEventListener("touchcancel", handleTouchEnd);
     };
   }, [dragging, resizing, size.width, size.height]);
 
@@ -1218,21 +1293,21 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
       <div
         style={{
           position: "fixed",
-          left: pos.x,
-          top: pos.y,
-          width: size.width,
-          height: size.height,
-          maxWidth: "95vw",
-          maxHeight: "90vh",
+          left: isMobileViewport ? 0 : pos.x,
+          top: isMobileViewport ? 0 : pos.y,
+          width: isMobileViewport ? viewport.width : size.width,
+          height: isMobileViewport ? viewport.height : size.height,
+          maxWidth: isMobileViewport ? "100vw" : "95vw",
+          maxHeight: isMobileViewport ? "100vh" : "90vh",
           background: "#020617",
           color: "#f9fafb",
-          borderRadius: 16,
+          borderRadius: isMobileViewport ? 0 : 16,
           boxShadow: "0 20px 60px rgba(0,0,0,0.45)",
           zIndex: 1001,
           display: "flex",
           flexDirection: "column",
           boxSizing: "border-box",
-          padding: 20,
+          padding: isMobileViewport ? 12 : 20,
           cursor: dragging ? "grabbing" : "default",
         }}
       >

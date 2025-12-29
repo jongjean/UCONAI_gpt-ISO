@@ -519,7 +519,7 @@ const Rightbar: React.FC<RightbarProps> = ({
         </div>
 
         {/* 첨부 파일 요약 */}
-        <div className="iso-rightbar-section">
+        <div className="iso-rightbar-section iso-rightbar-attachments">
           <div className="iso-rightbar-section-title">첨부 파일</div>
 
           {/* 통합공용 첨부파일 */}
@@ -528,7 +528,7 @@ const Rightbar: React.FC<RightbarProps> = ({
             {commonGuideFiles.length === 0 ? (
               <div style={{ fontSize: 12, color: "#9ca3af" }}>없음</div>
             ) : (
-              <div className="iso-rightbar-files">
+              <div className="iso-rightbar-files flexible">
                 {commonGuideFiles.map((f) => (
                   <div
                     key={f.id}
@@ -558,7 +558,7 @@ const Rightbar: React.FC<RightbarProps> = ({
             {roomGuideFiles.length === 0 ? (
               <div style={{ fontSize: 12, color: "#9ca3af" }}>없음</div>
             ) : (
-              <div className="iso-rightbar-files">
+              <div className="iso-rightbar-files flexible">
                 {roomGuideFiles.map((f) => (
                   <div
                     key={f.id}
@@ -588,7 +588,7 @@ const Rightbar: React.FC<RightbarProps> = ({
         {messageAttachments.length === 0 && attachedFiles.length === 0 ? (
           <div style={{ fontSize: 12, color: "#9ca3af" }}>없음</div>
         ) : (
-          <div className="iso-rightbar-files">
+          <div className="iso-rightbar-files flexible">
             {/* 이미 전송된 첨부(읽기전용) */}
         {messageAttachments.map((f) =>
                   renderFileRow(
@@ -613,7 +613,10 @@ const Rightbar: React.FC<RightbarProps> = ({
           </div>
         </div>
 
-        {/* 로그인 섹션 */}
+      </div>
+
+      {/* 로그인 섹션 (푸터 고정) */}
+      <div className="iso-rightbar-footer">
         <div className="iso-rightbar-section">
           <div className="iso-rightbar-section-title">로그인</div>
           {(isSuperAdmin && authUser) || !authUser ? (
@@ -727,7 +730,7 @@ const Rightbar: React.FC<RightbarProps> = ({
             </div>
           )}
         </div>
-        </div>
+      </div>
 
         {isSuperAdmin && adminPanelOpen && (
           <div

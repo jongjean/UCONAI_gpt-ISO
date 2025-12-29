@@ -418,15 +418,10 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
       <div className="iso-main-card">
         <div className="iso-main-card-header">
           <h1 className="iso-main-title">ISO/IEC개발 AI 서포터 - 유코나이</h1>
-          <p className="iso-main-subtitle">
-            ISO/IEC TR 25468 / IS-PWI 26255 - Metaverse LET 개발 지원
-          </p>
+          <p className="iso-main-subtitle">Metaverse LET ISO 개발 지원</p>
         </div>
 
-        <div className="iso-main-description">
-          우측 &quot;대화 설정 / 기능&quot; 패널에서 모델·실행 방식·답변 모드를
-          선택하고, 이 영역에서는 ISO/IEC 초안·TR/IS 문서를 중심으로 대화를 진행합니다.
-        </div>
+        <div className="iso-main-description" />
 
         <div className="iso-main-chat" ref={messagesRef}>
           {renderMessages()}
@@ -453,9 +448,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
           >
             <ClipIcon />
           </button>
-          <span>
-            파일/이미지를 드래그하거나 아이콘을 눌러 첨부할 수 있습니다.
-          </span>
+          <span>파일첨부</span>
           <input
             ref={fileInputRef}
             type="file"
